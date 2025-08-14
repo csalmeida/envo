@@ -81,14 +81,15 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
       // If it's not a quote switch back to normal mode.
       lexer.mode = .NORMAL;
     }
+      // If the current byte is a double / single quote it means it could be a closing quote if it's not escaped.
+      const previous_character_is_backslash: bool = if (index == 0 ) false else contents[index - 1] == '\\';
 
     // My thinking here is at this point the lexer might already be in quotation mode so we can handle the byte sequence and create a token then, what do you think?
     switch (lexer.mode) {
       .DOUBLE_QUOTATION => {
-        // If the current byte is a double quote it means it could be a closing quote
+
         if (byte == '\"') {
           // If this quote is being escaped it is part of the current string we are trying to wrap.
-          const previous_character_is_backslash: bool = if (index == 0 ) false else contents[index - 1] == '\\';
           if (previous_character_is_backslash) {
             try bytes_accumulator.append(byte);
           } else {
@@ -115,7 +116,27 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
         }
       },
       .SINGLE_QUOTATION => {
+        if (byte == '\'') {
+          if (previous_character_is_backslash) {
+            try bytes_accumulator.append(byte);
+          } else {
+            try bytes_accumulator.append(byte);
 
+            try tokens.append(Token {
+              .type = .SINGLE_QUOTED_STRING,
+              .value = try allocator.dupe(u8, bytes_accumulator.items)
+            });
+
+            bytes_accumulator.clearAndFree();
+
+            lexer.mode = .NORMAL;
+          }
+
+          continue;
+        } else {
+          try bytes_accumulator.append(byte);
+          continue;
+        }
       }, // We will deal with this in a moment for now let's find a nice implementation for double quotes first and we'll use the same pattern here.
       else => {}
     }
@@ -185,8 +206,8 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
       }
     }
 
-    // Given it is in normal mode we need to switch modes at that point to quoted:
-    const is_beginning_of_quoted_string = is_quote and lexer.mode == .NORMAL;
+    // Given it is in normal mode we need to switch modes at that point to quoted unless its escaped:
+    const is_beginning_of_quoted_string = is_quote and !previous_character_is_backslash and lexer.mode == .NORMAL;
     if (is_beginning_of_quoted_string) {
       // Switches back to normal mode:
       lexer.setModeFromByte(byte);
