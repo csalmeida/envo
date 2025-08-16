@@ -6,6 +6,7 @@
 /// Unclosed strings will be parsed as `WORD` tokens.
 /// Quoted strings will be parsed whether they are the full value of part of an unquoted value.
 /// Every escaped character inside a quoted value will not be tokenised, including valid delimiters.
+/// Mixed unicode values are supported.
 ///
 /// Edge cases:
 /// If someone forgets a closing quote, the tokeniser won't panic. It consumes everything until EOF, which should make the error very apparent to the programmer when they try to use the parsed values. e.g `GREETING="hello world\n` will continue parsing until another `"` is found.
@@ -14,6 +15,7 @@
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 /// Describes available token types.
 /// Each type gives an indication what a group of bytes is in the file,
@@ -100,7 +102,7 @@ const Lexer = struct {
 
 /// Looks at the `.env` file contents and categorizes each piece into symbols.
 /// Each symbol will have a `TokenType` and a list of tokens will be returned.
-pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]Token {
+pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!ArrayList(Token) {
   // Mutable lexer as we update it when iterating through contents.
   var lexer = Lexer {
     .line = 1,
@@ -108,10 +110,10 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
   };
 
   // Stores all tokens in the order they were found.
-  var tokens = std.ArrayList(Token).init(allocator);
+  var tokens = ArrayList(Token).init(allocator);
 
   // Keeps track of a number of bytes to idenfity tokens that are composed of many characters.
-  var bytes_accumulator = std.ArrayList(u8).init(allocator);
+  var bytes_accumulator = ArrayList(u8).init(allocator);
 
   // Contents are UTF-8 sequence of bytes containing character representation.
   // A byte might be a single character of just part of the represenation of a full character, up to 4 bytes.
@@ -306,5 +308,631 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
     }
   );
 
-  return tokens.items;
+  return tokens;
+}
+
+/// Since the token requires multiple allocations for each token value
+/// This helper frees up all values and then the token list allocations.
+pub fn freeTokens(allocator: Allocator, tokens: *ArrayList(Token)) void {
+  for (tokens.items) |token| {
+    switch (token.type) {
+      .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
+          allocator.free(token.value);
+      },
+      else => {
+        // Don't free string literals for delimiters
+      }
+    }
+  }
+
+  tokens.clearAndFree();
+}
+
+
+// TESTS
+const testing = std.testing;
+
+test "empty file" {
+  const contents = "";
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  try testing.expect(tokens.len == 1);
+  try testing.expect(tokens[0].type == .END_OF_FILE);
+}
+
+test "white space only file" {
+  const contents = "     \n      \n   ";
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Expects 5 white space tokens:
+  for (0..4) |index| {
+   try testing.expect(tokens[index].type == .WHITE_SPACE);
+  }
+
+  try testing.expect(tokens[5].type == .NEW_LINE);
+
+  // Expects another 6 white space tokens:
+  for (6..11) |index| {
+   try testing.expect(tokens[index].type == .WHITE_SPACE);
+  }
+
+  try testing.expect(tokens[12].type == .NEW_LINE);
+
+  // Expects 3 more white space tokens.
+  for (13..15) |index| {
+   try testing.expect(tokens[index].type == .WHITE_SPACE);
+  }
+}
+
+test "comments only file skips all comments" {
+  const contents = "# Just comments\n# More comments";
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Comments are completely skipped during tokenization, leaving only
+  // the newline between them and EOF
+  try testing.expect(tokens.len == 2);
+  try testing.expect(tokens[0].type == .NEW_LINE);
+  try testing.expect(tokens[1].type == .END_OF_FILE);
+}
+
+test "simple unquoted values" {
+  const contents =
+  \\DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
+  \\API_VERSION=v2.1.3
+  \\SERVICE_NAME=my-awesome-service
+  \\UNQUOTED_WITH_SPACES=this has spaces but no quotes
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // First line:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .WORD);
+  try testing.expect(tokens[3].type == .NEW_LINE);
+
+  // Second line:
+  try testing.expect(tokens[4].type == .WORD);
+  try testing.expect(tokens[5].type == .EQUALS);
+  try testing.expect(tokens[6].type == .WORD);
+  try testing.expect(tokens[7].type == .NEW_LINE);
+
+  // Third line:
+  try testing.expect(tokens[8].type  == .WORD);
+  try testing.expect(tokens[9].type  == .EQUALS);
+  try testing.expect(tokens[10].type == .WORD);
+  try testing.expect(tokens[11].type == .NEW_LINE);
+
+  // Fourth line:
+  try testing.expect(tokens[12].type == .WORD);
+  try testing.expect(tokens[13].type == .EQUALS);
+  try testing.expect(tokens[14].type == .WORD);
+  try testing.expect(tokens[15].type == .WHITE_SPACE);
+  try testing.expect(tokens[16].type == .WORD);
+  try testing.expect(tokens[17].type == .WHITE_SPACE);
+  try testing.expect(tokens[18].type == .WORD);
+  try testing.expect(tokens[19].type == .WHITE_SPACE);
+  try testing.expect(tokens[20].type == .WORD);
+  try testing.expect(tokens[21].type == .WHITE_SPACE);
+  try testing.expect(tokens[22].type == .WORD);
+  try testing.expect(tokens[23].type == .WHITE_SPACE);
+  try testing.expect(tokens[24].type == .WORD);
+  try testing.expect(tokens[25].type == .END_OF_FILE);
+}
+
+test "simple double quoted strings" {
+  const contents =
+  \\DATABASE_URL="postgresql://user:pass@localhost:5432/mydb"
+  \\API_VERSION="v2.1.3"
+  \\SERVICE_NAME="my-awesome-service"
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // First line:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .NEW_LINE);
+
+  // Second line:
+  try testing.expect(tokens[4].type == .WORD);
+  try testing.expect(tokens[5].type == .EQUALS);
+  try testing.expect(tokens[6].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[7].type == .NEW_LINE);
+
+  // Third line:
+  try testing.expect(tokens[8].type  == .WORD);
+  try testing.expect(tokens[9].type  == .EQUALS);
+  try testing.expect(tokens[10].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[11].type == .END_OF_FILE);
+}
+
+test "simple single quoted strings" {
+  const contents =
+  \\DATABASE_URL='postgresql://user:pass@localhost:5432/mydb'
+  \\API_VERSION='v2.1.3'
+  \\SERVICE_NAME='my-awesome-service'
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // First line:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .NEW_LINE);
+
+  // Second line:
+  try testing.expect(tokens[4].type == .WORD);
+  try testing.expect(tokens[5].type == .EQUALS);
+  try testing.expect(tokens[6].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[7].type == .NEW_LINE);
+
+  // Third line:
+  try testing.expect(tokens[8].type  == .WORD);
+  try testing.expect(tokens[9].type  == .EQUALS);
+  try testing.expect(tokens[10].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[11].type == .END_OF_FILE);
+}
+
+test "double quoted strings with delimiters" {
+  const contents =
+  \\DATABASE_URL="postgresql://user:pass@localhost:5432/mydb"
+  \\MESSAGE="Hello world with spaces and = equals"
+  \\MULTILINE="Line 1
+  \\Line 2"
+  \\COMMENT_EXAMPLE="This has # hash in it"
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // First line:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .NEW_LINE);
+
+  // Second line:
+  try testing.expect(tokens[4].type == .WORD);
+  try testing.expect(tokens[5].type == .EQUALS);
+  try testing.expect(tokens[6].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[7].type == .NEW_LINE);
+
+  // Third line:
+  try testing.expect(tokens[8].type == .WORD);
+  try testing.expect(tokens[9].type == .EQUALS);
+  try testing.expect(tokens[10].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[11].type == .NEW_LINE);
+
+  // Fourth line:
+  try testing.expect(tokens[12].type == .WORD);
+  try testing.expect(tokens[13].type == .EQUALS);
+  try testing.expect(tokens[14].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[15].type == .END_OF_FILE);
+}
+
+test "single quoted strings with delimiters" {
+  const contents =
+  \\DATABASE_URL='postgresql://user:pass@localhost:5432/mydb'
+  \\MESSAGE='Hello world with spaces and = equals'
+  \\MULTILINE='Line 1
+  \\Line 2'
+  \\COMMENT_EXAMPLE='This has # hash in it'
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // First line:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .NEW_LINE);
+
+  // Second line:
+  try testing.expect(tokens[4].type == .WORD);
+  try testing.expect(tokens[5].type == .EQUALS);
+  try testing.expect(tokens[6].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[7].type == .NEW_LINE);
+
+  // Third line:
+  try testing.expect(tokens[8].type == .WORD);
+  try testing.expect(tokens[9].type == .EQUALS);
+  try testing.expect(tokens[10].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[11].type == .NEW_LINE);
+
+  // Fourth line:
+  try testing.expect(tokens[12].type == .WORD);
+  try testing.expect(tokens[13].type == .EQUALS);
+  try testing.expect(tokens[14].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[15].type == .END_OF_FILE);
+}
+
+// Should have KEY as WORD, = as EQUALS, unterminated quote as WORD, and EOF:
+test "unterminated double quotes result in word token" {
+  const contents =
+  \\KEY="never closes
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, unterminated quote as WORD, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .WORD);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+// Should have KEY as WORD, = as EQUALS, unterminated quote as WORD, and EOF:
+test "unterminated single quotes result in word token" {
+  const contents =
+  \\KEY='never closes
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, unterminated quote as WORD, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .WORD);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "empty double quoted strings" {
+  const contents =
+  \\KEY=""
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, empty double quoted string, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "empty single quoted strings" {
+  const contents =
+  \\KEY=''
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, empty single quoted string, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "escaped double quotes" {
+  const contents =
+  \\KEY="She said \"hello\""
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, double quoted string with escaped quotes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "escaped single quotes" {
+  const contents =
+  \\KEY='She said \'hello\''
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, single quoted string with escaped quotes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "escaped backslashes in double quotes" {
+  const contents =
+  \\KEY="Path\\to\\file"
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, double quoted string with escaped backslashes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "escaped backslashes in single quotes" {
+  const contents =
+  \\KEY='Path\\to\\file'
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, single quoted string with escaped backslashes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "mixed escapes in double quotes" {
+  const contents =
+  \\KEY="Line 1\nLine 2\tTabbed"
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, double quoted string with mixed escapes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "mixed escapes in single quotes" {
+  const contents =
+  \\KEY='Line 1\nLine 2\tTabbed'
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, single quoted string with mixed escapes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "inline comments" {
+  const contents =
+  \\KEY=value # This is a comment
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .WORD);
+  try testing.expect(tokens[3].type == .WHITE_SPACE);
+  try testing.expect(tokens[4].type == .END_OF_FILE);
+}
+
+test "comments with quotes" {
+  const contents =
+  \\# This "quote" is in a comment
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should only have EOF since entire line is a comment:
+  try testing.expect(tokens[0].type == .END_OF_FILE);
+}
+
+test "hash in double quoted string" {
+  const contents =
+  \\ PASSWORD="secret#123"
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have WHITE_SPACE, PASSWORD as WORD, = as EQUALS, double quoted string with hash, and EOF:
+  try testing.expect(tokens[0].type == .WHITE_SPACE);
+  try testing.expect(tokens[1].type == .WORD);
+  try testing.expect(tokens[2].type == .EQUALS);
+  try testing.expect(tokens[3].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[4].type == .END_OF_FILE);
+}
+
+test "hash in single quoted string" {
+  const contents =
+  \\ PASSWORD='secret#123'
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have WHITE_SPACE, PASSWORD as WORD, = as EQUALS, single quoted string with hash, and EOF:
+  try testing.expect(tokens[0].type == .WHITE_SPACE);
+  try testing.expect(tokens[1].type == .WORD);
+  try testing.expect(tokens[2].type == .EQUALS);
+  try testing.expect(tokens[3].type == .SINGLE_QUOTED_STRING);
+  try testing.expect(tokens[4].type == .END_OF_FILE);
+}
+
+test "unquoted values with double quotes" {
+  const contents =
+  \\She said "hello" today
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have multiple WORD tokens with WHITE_SPACE and a DOUBLE_QUOTED_STRING:
+  try testing.expect(tokens[0].type == .WORD); // She
+  try testing.expect(tokens[1].type == .WHITE_SPACE);
+  try testing.expect(tokens[2].type == .WORD); // said
+  try testing.expect(tokens[3].type == .WHITE_SPACE);
+  try testing.expect(tokens[4].type == .DOUBLE_QUOTED_STRING); // "hello"
+  try testing.expect(tokens[5].type == .WHITE_SPACE);
+  try testing.expect(tokens[6].type == .WORD); // today
+  try testing.expect(tokens[7].type == .END_OF_FILE);
+}
+
+test "unquoted values with single quotes" {
+  const contents =
+  \\She said 'hello' today
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have multiple WORD tokens with WHITE_SPACE and a SINGLE_QUOTED_STRING:
+  try testing.expect(tokens[0].type == .WORD); // She
+  try testing.expect(tokens[1].type == .WHITE_SPACE);
+  try testing.expect(tokens[2].type == .WORD); // said
+  try testing.expect(tokens[3].type == .WHITE_SPACE);
+  try testing.expect(tokens[4].type == .SINGLE_QUOTED_STRING); // 'hello'
+  try testing.expect(tokens[5].type == .WHITE_SPACE);
+  try testing.expect(tokens[6].type == .WORD); // today
+  try testing.expect(tokens[7].type == .END_OF_FILE);
+}
+
+test "mixed quote types" {
+  const contents =
+  \\KEY="outer 'inner' quotes"
+  ;
+
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Should have KEY as WORD, = as EQUALS, double quoted string containing single quotes, and EOF:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[3].type == .END_OF_FILE);
 }
