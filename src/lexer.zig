@@ -6,6 +6,10 @@
 /// Unclosed strings will be parsed as `WORD` tokens.
 /// Quoted strings will be parsed whether they are the full value of part of an unquoted value.
 /// Every escaped character inside a quoted value will not be tokenised, including valid delimiters.
+///
+/// Edge cases:
+/// If someone forgets a closing quote, the tokeniser won't panic. It consumes everything until EOF, which should make the error very apparent to the programmer when they try to use the parsed values. e.g `GREETING="hello world\n` will continue parsing until another `"` is found.
+///
 
 const std = @import("std");
 
@@ -190,6 +194,9 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
       .SKIP => {
         if (delimiter == .LF_NEW_LINE or delimiter == .CRLF_NEW_LINE) {
           lexer.mode = .NORMAL;
+        } else {
+          // For any other delimiter or character skip it.
+          continue;
         }
       },
 
