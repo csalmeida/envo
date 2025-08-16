@@ -45,6 +45,7 @@ const DelimiterType = enum {
   CRLF_NEW_LINE,
   EQUALS,
   WHITE_SPACE,
+  HASH_SIGN,
   UNKNOWN,
 };
 
@@ -52,6 +53,7 @@ const DelimiterType = enum {
 /// delimiters and how to identify strings of characters wrapped in quotes.
 const LexerMode = enum {
   NORMAL,
+  SKIP,
   SINGLE_QUOTATION,
   DOUBLE_QUOTATION,
 };
@@ -84,8 +86,9 @@ const Lexer = struct {
     // Any other delimiter is classified here:
     switch (current_byte) {
       '\n' => return DelimiterType.LF_NEW_LINE,
-      '=' => return DelimiterType.EQUALS,
-      ' ' => return DelimiterType.WHITE_SPACE,
+      '=' =>  return DelimiterType.EQUALS,
+      ' ' =>  return DelimiterType.WHITE_SPACE,
+      '#' =>  return DelimiterType.HASH_SIGN,
       else => return DelimiterType.UNKNOWN,
     }
   }
@@ -123,6 +126,9 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
     // If the current byte is a double / single quote it means it could be a closing quote if it's not escaped.
     const previous_character_is_backslash: bool = if (previous_byte) |prev_byte| prev_byte == '\\' else false;
 
+    // Determines which type of delimiter we found. This might be unknown which means it's probably part of a `WORD`.
+    const delimiter: DelimiterType = lexer.delimiterType(previous_byte, byte);
+
     // My thinking here is at this point the lexer might already be in quotation mode so we can handle the byte sequence and create a token then, what do you think?
     switch (lexer.mode) {
       .DOUBLE_QUOTATION => {
@@ -153,6 +159,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
           continue;
         }
       },
+
       .SINGLE_QUOTATION => {
         if (byte == '\'') {
           if (previous_character_is_backslash) {
@@ -175,12 +182,19 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
           try bytes_accumulator.append(byte);
           continue;
         }
-      }, // We will deal with this in a moment for now let's find a nice implementation for double quotes first and we'll use the same pattern here.
+      },
+
+      // If the lexer finds itself in skip mode it's because a comment delimiter was picked up.
+      // Here we check if the current delimiter found is a new line, this is where we stop ignoring contents and return to normal mode.
+      // As a side effect the delimiter logic will handle adding the new line token to the list.
+      .SKIP => {
+        if (delimiter == .LF_NEW_LINE or delimiter == .CRLF_NEW_LINE) {
+          lexer.mode = .NORMAL;
+        }
+      },
+
       else => {}
     }
-
-    // Determines which type of delimiter we found. This might be unknown which means it's probably part of a `WORD`.
-    const delimiter: DelimiterType = lexer.delimiterType(previous_byte, byte);
 
     // TODO: I would like to improve this code in the future but
     // for now it's just a way to say, we want to tokenise the word and flush the accumulator.
@@ -242,7 +256,15 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
           try tokens.append(token);
           continue;
         },
-        else => {}
+
+        // For comments we would like to skip any characters we find until a new delimiter is found again.
+        .HASH_SIGN => {
+          lexer.mode = .SKIP;
+          continue;
+        },
+
+        // Take no action if byte is not a delimiter:
+        .UNKNOWN => {},
       }
     }
 
