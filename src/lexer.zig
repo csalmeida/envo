@@ -119,10 +119,6 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
     // If it is the last byte we want to return to normal mode.
     // In quotation mode if no closing quote was found that just becomes a word.
     const is_last_byte = (contents.len - 1) == index;
-    if (is_last_byte) {
-      // If it's not a quote switch back to normal mode.
-      lexer.mode = .NORMAL;
-    }
 
     // Previous character, might not be present if it's first character there's no previous character:
     const previous_byte: ?u8 = if (index == 0) null else contents[index - 1];
@@ -285,6 +281,11 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
     // It did not hit a delimiter character so we add the character to the accumulator.
     // The delimiters wouldn't get added to the list because the loop does not each this stage due to the continue words right?
     try bytes_accumulator.append(byte);
+
+    // If it's the last byte switch to normal mode.
+    if (is_last_byte) {
+      lexer.mode = .NORMAL;
+    }
   }
 
   // At this point the file probably reached the end, we can check if there's another word in the accumulator and then flush it one last time.
