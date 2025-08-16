@@ -201,9 +201,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
       else => {}
     }
 
-    // TODO: I would like to improve this code in the future but
-    // for now it's just a way to say, we want to tokenise the word and flush the accumulator.
-    // then we let the if statements below handle the tokenisation of delimiters.
+    // Distinguish between tokenisable delimiters and quotes.
     const is_delimiter = (delimiter != .UNKNOWN);
     const is_quote = (byte == '\"' or byte == '\'');
 
