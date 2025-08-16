@@ -1,9 +1,11 @@
 /// The lexer module is used specifically to run through the contents
 /// of a `.env` file and tokenise sequences of bytes in preparation
 /// to parsing.
-
-// 1. Re-factor to be able to detect wrappers via an accumulator.
-// 2. We have to be able to find an initial \" and peek to find the closing one, this can be on the same line or another line.
+///
+/// It will parse double or single quoted and unquoted strings values.
+/// Unclosed strings will be parsed as `WORD` tokens.
+/// Quoted strings will be parsed whether they are the full value of part of an unquoted value.
+/// Every escaped character inside a quoted value will not be tokenised, including valid delimiters.
 
 const std = @import("std");
 
@@ -22,7 +24,9 @@ const TokenType = enum {
   SINGLE_QUOTED_STRING
 };
 
-// Assigns the value found with the token type.
+/// Used to represent each symbol found the file.
+/// Contains the token type (category) and the actual byte sequence from the source.
+/// Assigns the value found with the token type.
 const Token = struct {
   type: TokenType,
   value: []const u8,
@@ -34,13 +38,26 @@ const TokenizationError = error {
     OutOfMemory,
 };
 
+/// Defines each kind of supported delimiter.
+/// This is useful when two delimiters share the same type of token such as the new line ones.
+const DelimiterType = enum {
+  LF_NEW_LINE,
+  CRLF_NEW_LINE,
+  EQUALS,
+  WHITE_SPACE,
+  UNKNOWN,
+};
+
+/// The mode is used to understand how the lexer should tokenise
+/// delimiters and how to identify strings of characters wrapped in quotes.
 const LexerMode = enum {
   NORMAL,
   SINGLE_QUOTATION,
   DOUBLE_QUOTATION,
 };
 
-/// Useful to output where a tokenisation error occurs.
+/// Useful to output where a tokenisation error occurs
+/// and maintain the current state of the lexer.
 const Lexer = struct {
   line: u16, // Limits itself to u16 as an .env file likely won't have more than 65,536 lines.
   mode: LexerMode,
@@ -52,6 +69,24 @@ const Lexer = struct {
       '\"' => self.mode = .DOUBLE_QUOTATION,
       '\'' => self.mode = .SINGLE_QUOTATION,
       else => self.mode = .NORMAL
+    }
+  }
+
+  /// Understands which delimiter we have hit since new line can be one or multiple types.
+  fn delimiterType(_: *Lexer, previous_byte: ?u8, current_byte: u8) DelimiterType {
+    if (previous_byte) |prev_byte| {
+      // If it's a carriage return which takes two bytes, return early:
+      if (prev_byte == '\r' and current_byte == '\n') {
+        return DelimiterType.CRLF_NEW_LINE;
+      }
+    }
+
+    // Any other delimiter is classified here:
+    switch (current_byte) {
+      '\n' => return DelimiterType.LF_NEW_LINE,
+      '=' => return DelimiterType.EQUALS,
+      ' ' => return DelimiterType.WHITE_SPACE,
+      else => return DelimiterType.UNKNOWN,
     }
   }
 };
@@ -81,13 +116,16 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
       // If it's not a quote switch back to normal mode.
       lexer.mode = .NORMAL;
     }
-      // If the current byte is a double / single quote it means it could be a closing quote if it's not escaped.
-      const previous_character_is_backslash: bool = if (index == 0 ) false else contents[index - 1] == '\\';
+
+    // Previous character, might not be present if it's first character there's no previous character:
+    const previous_byte: ?u8 = if (index == 0) null else contents[index - 1];
+
+    // If the current byte is a double / single quote it means it could be a closing quote if it's not escaped.
+    const previous_character_is_backslash: bool = if (previous_byte) |prev_byte| prev_byte == '\\' else false;
 
     // My thinking here is at this point the lexer might already be in quotation mode so we can handle the byte sequence and create a token then, what do you think?
     switch (lexer.mode) {
       .DOUBLE_QUOTATION => {
-
         if (byte == '\"') {
           // If this quote is being escaped it is part of the current string we are trying to wrap.
           if (previous_character_is_backslash) {
@@ -141,10 +179,13 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
       else => {}
     }
 
+    // Determines which type of delimiter we found. This might be unknown which means it's probably part of a `WORD`.
+    const delimiter: DelimiterType = lexer.delimiterType(previous_byte, byte);
+
     // TODO: I would like to improve this code in the future but
     // for now it's just a way to say, we want to tokenise the word and flush the accumulator.
     // then we let the if statements below handle the tokenisation of delimiters.
-    const is_delimiter = (byte == '\n' or byte == '=' or byte == ' ');
+    const is_delimiter = (delimiter != .UNKNOWN);
     const is_quote = (byte == '\"' or byte == '\'');
 
     // If we hit a delimiter that can be tokenised and we are in normal mode we do the following:
@@ -165,17 +206,16 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
 
       // When we hit a delimiter we create a token and move on to the next iteration.
       // Otherwise add them to the accumulator.
-      // TODO: In the future, peek ahead to address `\r` and `\r\n` cases.
-      // Don't worry about it now.
-      switch (byte) {
-        '\n' => {
+      switch (delimiter) {
+        .LF_NEW_LINE,
+        .CRLF_NEW_LINE => {
           // Update lexer instance to indicate we have moved to a new line:
           lexer.line = lexer.line + 1;
 
           // Instantiate Token with TokenType.NEW_LINE and add it to the list when I work out what I can do with the allocator.
           const token = Token {
             .type = .NEW_LINE,
-            .value = "\n", // We know the value we are just going to assign it.
+            .value = if (delimiter == .LF_NEW_LINE) "\n" else "\r\n", // We know the value we are just going to assign it.
           };
 
           // Then call tokens.append(token) and move to the next iteration of the loop
@@ -183,7 +223,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
           continue;
         },
 
-        '=' => {
+        .EQUALS => {
           const token = Token {
             .type = .EQUALS,
             .value = "=", // We know the value we are just going to assign it.
@@ -193,7 +233,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError![]
           continue;
         },
 
-        ' ' => {
+        .WHITE_SPACE => {
           const token = Token {
             .type = .WHITE_SPACE,
             .value = " ",
