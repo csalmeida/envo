@@ -11,9 +11,9 @@
 /// - Mathematically LL(1) with no ambiguous productions.
 ///
 /// Full grammar:
-/// <FILE_CONTENTS> ::= <STATEMENT>* END_OF_FILE
-/// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE
-/// <ASSIGNMENT> ::= <IDENTIFIER> (WHITE_SPACE)* EQUALS (WHITE_SPACE)* <VALUE>
+/// <FILE_CONTENTS> ::= NEW_LINE* <STATEMENT>* END_OF_FILE
+/// <STATEMENT> ::= <ASSIGNMENT> WHITE_SPACE* NEW_LINE+
+/// <ASSIGNMENT> ::= <IDENTIFIER> WHITE_SPACE* EQUALS WHITE_SPACE* <VALUE>
 /// <IDENTIFIER> ::= WORD
 /// <VALUE> ::= <MIXED_CONTENT> | ε
 /// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
@@ -200,9 +200,14 @@ const Parser = struct {
   }
 
   /// Parses a grammar rule:
-  /// <FILE_CONTENTS> ::= <STATEMENT>* END_OF_FILE
+  /// <FILE_CONTENTS> ::= NEW_LINE* <STATEMENT>* END_OF_FILE
   fn parseFileContents(self: *Parser) !ASTNode {
     var children_nodes = ASTArrayList.init(self.allocator);
+
+    // Consume any leading blank lines before looking for statements:
+    while (self.currentToken().type == .NEW_LINE) {
+      _ = try self.expect(.NEW_LINE);
+    }
 
     // .currentToken() needs to run on each iteration to change in when it is updated.
     while (self.currentToken().type != .END_OF_FILE) {
@@ -223,7 +228,7 @@ const Parser = struct {
   }
 
   /// Parses a grammar rule:
-  /// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE
+  /// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE+
   fn parseStatement(self: *Parser) !ASTNode {
     // Attempt to parse an assignment:
     const assignment_ast_node = try self.parseAssignment();
@@ -239,6 +244,11 @@ const Parser = struct {
 
     // An assignment ends with a new line.
     _ = try self.expect(.NEW_LINE);
+
+    // Ignores any other new lines:
+    while (self.currentToken().type == .NEW_LINE) {
+      _ = try self.expect(.NEW_LINE);
+    }
 
     return ASTNode {
       .type = .STATEMENT,
