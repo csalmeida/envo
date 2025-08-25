@@ -4,10 +4,32 @@
 /// and enforce grammatical rules to make sense of the available tokens and their order.
 /// Grammar definition.
 ///
-/// This parser makes use of LL(1):
+/// This parser uses an LL(1)-style approach with practical disambiguation:
 /// - Reads tokens from left to right.
 /// - Left-most non-terminals are expanded first.
 /// - Can look one token ahead.
+///
+/// Full grammar:
+/// <FILE_CONTENTS> ::= <STATEMENT>* END_OF_FILE
+/// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE
+/// <ASSIGNMENT> ::= <IDENTIFIER> (WHITE_SPACE)* EQUALS (WHITE_SPACE)* <VALUE>
+/// <IDENTIFIER> ::= WORD
+/// <VALUE> ::= <UNQUOTED_STRING> | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING | ε
+/// <UNQUOTED_STRING> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
+/// <VALUE_TOKEN> ::= WORD | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING
+///
+/// Note: While this parser follows LL(1) principles, the underlying grammar is not
+/// mathematically LL(1) due to ambiguous productions in the <VALUE> rule. For example,
+/// DOUBLE_QUOTED_STRING tokens could theoretically be parsed through either:
+/// - <VALUE> → DOUBLE_QUOTED_STRING (direct path)
+/// - <VALUE> → <UNQUOTED_STRING> → <VALUE_TOKEN> → DOUBLE_QUOTED_STRING (indirect path)
+///
+/// However, this ambiguity is resolved through consistent implementation choices rather
+/// than grammar modifications. The parser always chooses the direct path for quoted
+/// strings and reserves the unquoted string path exclusively for WORD tokens. This
+/// approach maintains all the practical benefits of LL(1) parsing (no backtracking,
+/// efficient, predictable) while keeping the grammar intuitive and the implementation
+/// straightforward. It attempts practical parsing instead of mathematical perfection.
 
 const std = @import("std");
 const lexer = @import("lexer.zig");
