@@ -37,6 +37,42 @@ const NoNTerminalSymbol = enum {
 
 const ASTNodeType = NoNTerminalSymbol;
 
+/// Represents a node in the Abstract Syntax Tree (AST).
+///
+/// An ASTNode forms the fundamental building block of the parse tree generated
+/// during the parsing process. The complete AST is formed as a tree structure
+/// of interconnected ASTNodes, accessed from a root node (typically FILE_CONTENTS)
+/// which contains children nodes, which in turn may have their own children,
+/// creating a hierarchical representation of the parsed input.
+///
+/// Each node represents a non-terminal symbol from the grammar. While traditional
+/// parse trees include both terminal symbols (tokens) and non-terminal symbols,
+/// this AST abstracts away the raw terminal tokens and represents only the
+/// conceptual grammar rules (non-terminals). However, for convenience, some
+/// internal nodes may store the terminal token values directly in their `value`
+/// field (such as IDENTIFIER storing the actual identifier text) to provide
+/// easier access without requiring traversal to leaf nodes.
+///
+/// The AST provides a hierarchical representation of the parsed input that
+/// abstracts away syntactic details (like whitespace and punctuation) while
+/// preserving the semantic structure needed for further processing.
+///
+/// Tree Structure:
+///   - Internal nodes represent grammar rules with one or more children
+///   - Leaf nodes represent the lowest-level grammar constructs with no children
+///   - All nodes contain only non-terminal symbols from the grammar
+///   - Terminal symbols (tokens) are abstracted away but their values preserved
+///
+/// Fields:
+///   type: The grammatical symbol this node represents (from ASTNodeType enum)
+///   value: The string content associated with this node (empty for structural nodes,
+///          populated for nodes that capture terminal values like IDENTIFIER)
+///   children: Array of child nodes (empty for leaf nodes)
+///
+/// Memory Management:
+///   All fields use memory allocated from the parser's arena allocator and
+///   should not be manually freed, instead
+/// the caller can use their defined area for bulk deallocation when parsing is complete.
 pub const ASTNode = struct {
   type: ASTNodeType,
   value: []const u8,
@@ -52,6 +88,18 @@ const Parser = struct {
   tokens: []Token, // Terminal symbols received from lexical analysis.
   allocator: Allocator, // Required to maintain lists.
 
+  /// Initializes a new Parser instance with the provided allocator and tokens.
+  ///
+  /// The allocator should be an arena allocator that will be used for all memory
+  /// allocations during parsing, including AST node creation and string duplication.
+  /// Using an arena allocator allows for efficient bulk deallocation of all parser
+  /// memory when parsing is complete.
+  ///
+  /// Parameters:
+  ///   allocator: An arena allocator for parser memory management
+  ///   tokens: Slice of tokens from the lexical analysis phase
+  ///
+  /// Returns: A new Parser instance ready to begin parsing
   pub fn init(allocator: Allocator, tokens: []Token) Parser {
       return Parser {
           .currentTokenPosition = 0,
