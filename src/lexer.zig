@@ -1,6 +1,6 @@
 /// The lexer module is used specifically to run through the contents
 /// of a `.env` file and tokenise sequences of bytes in preparation
-/// to parsing.
+/// to parsing (lexical analysis).
 ///
 /// It will parse double or single quoted and unquoted strings values.
 /// Unclosed strings will be parsed as `WORD` tokens.
@@ -20,7 +20,7 @@ const ArrayList = std.ArrayList;
 /// Describes available token types.
 /// Each type gives an indication what a group of bytes is in the file,
 /// without giving it any actualy meaning beyond categorization.
-const TokenType = enum {
+pub const TokenType = enum {
   WORD,
   WHITE_SPACE,
   EQUALS,
@@ -33,13 +33,13 @@ const TokenType = enum {
 /// Used to represent each symbol found the file.
 /// Contains the token type (category) and the actual byte sequence from the source.
 /// Assigns the value found with the token type.
-const Token = struct {
+pub const Token = struct {
   type: TokenType,
   value: []const u8,
 };
 
 /// Types of errors supported during tokenisation.
-const TokenizationError = error {
+pub const TokenizationError = error {
     SyntaxError,
     OutOfMemory,
 };
@@ -325,7 +325,6 @@ pub fn freeTokens(allocator: Allocator, tokens: *ArrayList(Token)) void {
 
   tokens.clearAndFree();
 }
-
 
 // TESTS
 const testing = std.testing;
