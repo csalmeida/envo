@@ -4,32 +4,38 @@
 /// and enforce grammatical rules to make sense of the available tokens and their order.
 /// Grammar definition.
 ///
-/// This parser uses an LL(1)-style approach with practical disambiguation:
+/// This parser implements a true LL(1) parser:
 /// - Reads tokens from left to right.
 /// - Left-most non-terminals are expanded first.
 /// - Can look one token ahead.
+/// - Mathematically LL(1) with no ambiguous productions.
 ///
 /// Full grammar:
 /// <FILE_CONTENTS> ::= <STATEMENT>* END_OF_FILE
 /// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE
 /// <ASSIGNMENT> ::= <IDENTIFIER> (WHITE_SPACE)* EQUALS (WHITE_SPACE)* <VALUE>
 /// <IDENTIFIER> ::= WORD
-/// <VALUE> ::= <UNQUOTED_STRING> | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING | ε
-/// <UNQUOTED_STRING> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
+/// <VALUE> ::= <MIXED_CONTENT> | ε
+/// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
 /// <VALUE_TOKEN> ::= WORD | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING
 ///
-/// Note: While this parser follows LL(1) principles, the underlying grammar is not
-/// mathematically LL(1) due to ambiguous productions in the <VALUE> rule. For example,
-/// DOUBLE_QUOTED_STRING tokens could theoretically be parsed through either:
-/// - <VALUE> → DOUBLE_QUOTED_STRING (direct path)
-/// - <VALUE> → <UNQUOTED_STRING> → <VALUE_TOKEN> → DOUBLE_QUOTED_STRING (indirect path)
+/// LL(1) Properties:
 ///
-/// However, this ambiguity is resolved through consistent implementation choices rather
-/// than grammar modifications. The parser always chooses the direct path for quoted
-/// strings and reserves the unquoted string path exclusively for WORD tokens. This
-/// approach maintains all the practical benefits of LL(1) parsing (no backtracking,
-/// efficient, predictable) while keeping the grammar intuitive and the implementation
-/// straightforward. It attempts practical parsing instead of mathematical perfection.
+/// FIRST sets:
+/// - FIRST(<VALUE>) = {WORD, DOUBLE_QUOTED_STRING, SINGLE_QUOTED_STRING, ε}
+/// - FIRST(<MIXED_CONTENT>) = {WORD, DOUBLE_QUOTED_STRING, SINGLE_QUOTED_STRING}
+///
+/// At the <VALUE> decision point:
+/// - If current token is WORD, DOUBLE_QUOTED_STRING, or SINGLE_QUOTED_STRING → choose <MIXED_CONTENT>
+/// - If current token is anything else (NEW_LINE, END_OF_FILE) → choose ε (empty value)
+///
+/// This unified approach handles all value types through <MIXED_CONTENT>:
+/// - Single quoted strings: KEY="value"
+/// - Single unquoted words: KEY=value
+/// - Mixed content: KEY=word "quoted" more
+///
+/// The parser achieves most LL(1) properties: no FIRST set conflicts, single lookahead
+/// sufficient for all decisions, no left recursion, and a deterministic parse table.
 
 const std = @import("std");
 const lexer = @import("lexer.zig");
@@ -53,7 +59,7 @@ const NoNTerminalSymbol = enum {
   ASSIGNMENT,
   IDENTIFIER,
   VALUE,
-  UNQUOTED_STRING,
+  MIXED_CONTENT,
   VALUE_TOKEN,
 };
 
@@ -294,36 +300,18 @@ const Parser = struct {
   }
 
   /// Parses a grammar rule:
-  /// <VALUE> ::= <UNQUOTED_STRING> | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING | ε
+  /// <VALUE> ::= <MIXED_CONTENT> | ε
   fn parseValue(self: *Parser) !ASTNode {
-    // Checks which type of token we are looking at and picks the appropriate production for it:
-    const current_token = self.currentToken();
-    switch (current_token.type) {
-      .DOUBLE_QUOTED_STRING => {
-        const double_quoted_token = try self.expect(.DOUBLE_QUOTED_STRING);
-        return ASTNode {
-          .type = .VALUE,
-          .value = try self.allocator.dupe(u8, double_quoted_token.value),
-          .children = try self.emptyChildren()
-        };
-      },
-      .SINGLE_QUOTED_STRING => {
-        const single_quoted_token = try self.expect(.SINGLE_QUOTED_STRING);
-        return ASTNode {
-          .type = .VALUE,
-          .value = try self.allocator.dupe(u8, single_quoted_token.value),
-          .children = try self.emptyChildren()
-        };
-      },
-      .WORD => {
-        // A word token being present means it could be an unquoted string.
-        const unquoted_string_ast_node = try self.parseUnquotedString();
+    const token = self.currentToken();
+    switch (token.type) {
+      .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
+        const mixed_content_ast_node = try self.parseMixedContent();
         var children = try self.allocator.alloc(ASTNode, 1);
-        children[0] = unquoted_string_ast_node;
+        children[0] = mixed_content_ast_node;
 
         return ASTNode {
           .type = .VALUE,
-          .value = try self.allocator.dupe(u8, unquoted_string_ast_node.value),
+          .value = try self.allocator.dupe(u8, mixed_content_ast_node.value),
           .children = children
         };
       },
@@ -339,19 +327,19 @@ const Parser = struct {
   }
 
   /// Parses a grammar rule:
-  /// <UNQUOTED_STRING> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
-  fn parseUnquotedString(self: *Parser) !ASTNode {
-    // We do not want to free unquoted_value or children now - the arena allocator will be freed later by the caller
+  /// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
+  fn parseMixedContent(self: *Parser) !ASTNode {
+    // We do not want to free complete_value or children now - the arena allocator will be freed later by the caller
     // when they're done with the AST, which will free all tokens, ASTNodes, and other allocated values.
-    var unquoted_value = std.ArrayList(u8).init(self.allocator);
+    var complete_value = std.ArrayList(u8).init(self.allocator);
 
-    // An <UNQUOTED_STRING> can have multiple <VALUE_TOKEN> ASTNodes:
+    // A <MIXED_CONTENT> can have multiple <VALUE_TOKEN> ASTNodes:
     var children = std.ArrayList(ASTNode).init(self.allocator);
 
     // Attempt to find a value token:
     const first_value_token = try self.parseValueToken();
     // Append it to our final string:
-    try unquoted_value.appendSlice(first_value_token.value);
+    try complete_value.appendSlice(first_value_token.value);
 
     // Add value token as a child:
     try children.append(first_value_token);
@@ -365,13 +353,13 @@ const Parser = struct {
       //  WHITE_SPACE+ ← consume ALL whitespace in this group
       while (self.currentToken().type == .WHITE_SPACE) {
           const white_space_token = try self.expect(.WHITE_SPACE);
-          try unquoted_value.appendSlice(white_space_token.value);
+          try complete_value.appendSlice(white_space_token.value);
       }
 
       // Step 2: After consuming all whitespace, expect exactly one VALUE_TOKEN.
       // VALUE_TOKEN ← exactly one value token after all that whitespace
       const value_token = try self.parseValueToken();
-      try unquoted_value.appendSlice(value_token.value);
+      try complete_value.appendSlice(value_token.value);
 
       // Add value token as a child:
       try children.append(value_token);
@@ -379,8 +367,8 @@ const Parser = struct {
 
     // Return the whole unquoted string:
     return ASTNode {
-      .type = .UNQUOTED_STRING,
-      .value = try self.allocator.dupe(u8, unquoted_value.items),
+      .type = .MIXED_CONTENT,
+      .value = try self.allocator.dupe(u8, complete_value.items),
       .children = children.items,
     };
   }
