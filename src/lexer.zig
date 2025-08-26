@@ -274,7 +274,18 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
     // Given it is in normal mode we need to switch modes at that point to quoted unless its escaped:
     const is_beginning_of_quoted_string = is_quote and !previous_character_is_backslash and lexer.mode == .NORMAL;
     if (is_beginning_of_quoted_string) {
-      // Switches back to normal mode:
+      // Consume any left over bytes as a word token:
+      if (bytes_accumulator.items.len > 0) {
+        try tokens.append(Token {
+          .type = .WORD,
+          .value = try allocator.dupe(u8, bytes_accumulator.items), // We need to make a copy here, otherwise a free will make these unavailable.
+        });
+
+        // Clears the accumulator, not sure if it's still usable after that but we will find out.
+        bytes_accumulator.clearAndFree();
+      }
+
+      // Switches to quoted mode:
       lexer.setModeFromByte(byte);
     }
 
@@ -932,4 +943,71 @@ test "mixed quote types" {
   try testing.expect(tokens[1].type == .EQUALS);
   try testing.expect(tokens[2].type == .DOUBLE_QUOTED_STRING);
   try testing.expect(tokens[3].type == .END_OF_FILE);
+}
+
+test "supports generic unquoted array syntax" {
+  const contents =
+  \\KEY=["auth", "analytics"]
+  ;
+
+  // Setup allocator and tokenise:
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  // Checks there were tokens generated:
+  try testing.expect(tokens.len > 0);
+
+  // Each bracket and comma should be a `WORD` token:
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+  try testing.expect(tokens[2].type == .WORD);
+  try testing.expect(tokens[3].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[4].type == .WORD);
+  try testing.expect(tokens[5].type == .WHITE_SPACE);
+  try testing.expect(tokens[6].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[7].type == .WORD);
+  try testing.expect(tokens[8].type == .END_OF_FILE);
+}
+
+test "supports generic unquoted object syntax" {
+  const contents =
+  \\OBJECT_VAL={ "VAR1": "VAL1", "VAR2": "VAL2", "VA31": "VAL3" }
+  ;
+
+  // Setup allocator and tokenise:
+  const allocator = testing.allocator;
+  var tokenList = try tokenise(allocator, contents);
+  const tokens = tokenList.items;
+  defer freeTokens(allocator, &tokenList);
+
+  try testing.expect(tokens[0].type == .WORD);
+  try testing.expect(tokens[1].type == .EQUALS);
+
+  try testing.expect(tokens[2].type == .WORD); // {
+
+  try testing.expect(tokens[3].type == .WHITE_SPACE);
+  try testing.expect(tokens[4].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[5].type == .WORD);
+  try testing.expect(tokens[6].type == .WHITE_SPACE);
+  try testing.expect(tokens[7].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[8].type == .WORD); // ,
+
+  try testing.expect(tokens[9].type == .WHITE_SPACE);
+  try testing.expect(tokens[10].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[11].type == .WORD);
+  try testing.expect(tokens[12].type == .WHITE_SPACE);
+  try testing.expect(tokens[13].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[14].type == .WORD); // ,
+
+  try testing.expect(tokens[15].type == .WHITE_SPACE);
+  try testing.expect(tokens[16].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[17].type == .WORD);
+  try testing.expect(tokens[18].type == .WHITE_SPACE);
+  try testing.expect(tokens[19].type == .DOUBLE_QUOTED_STRING);
+  try testing.expect(tokens[20].type == .WHITE_SPACE);
+
+  try testing.expect(tokens[21].type == .WORD); // }
+  try testing.expect(tokens[22].type == .END_OF_FILE);
 }
