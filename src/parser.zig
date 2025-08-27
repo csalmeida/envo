@@ -16,7 +16,7 @@
 /// <ASSIGNMENT> ::= <IDENTIFIER> WHITE_SPACE* EQUALS WHITE_SPACE* <VALUE>
 /// <IDENTIFIER> ::= WORD
 /// <VALUE> ::= <MIXED_CONTENT> | ε
-/// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
+/// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE* <VALUE_TOKEN>)*
 /// <VALUE_TOKEN> ::= WORD | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING
 ///
 /// LL(1) Properties:
@@ -337,7 +337,7 @@ const Parser = struct {
   }
 
   /// Parses a grammar rule:
-  /// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE+ <VALUE_TOKEN>)*
+  /// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE* <VALUE_TOKEN>)*
   fn parseMixedContent(self: *Parser) !ASTNode {
     // We do not want to free complete_value or children now - the arena allocator will be freed later by the caller
     // when they're done with the AST, which will free all tokens, ASTNodes, and other allocated values.
@@ -354,25 +354,33 @@ const Parser = struct {
     // Add value token as a child:
     try children.append(first_value_token);
 
-    // Check for one or more white space between words.
-    // We want to append each of these values to the final unquoted value.
-    // While there's spaces after the first word we want to consume the those and expect a word right after it.
-    // (WHITE_SPACE+ VALUE_TOKEN)* ← zero or more groups
-    while (self.currentToken().type == .WHITE_SPACE) {
-      // Step 1: Consume one or more WHITE_SPACE tokens.
-      //  WHITE_SPACE+ ← consume ALL whitespace in this group
+    // Keep parsing the remaining value tokens and white space.
+    while (true) {
+      // Step 1: While there's spaces after the first word we want to consume those:
+      // WHITE_SPACE* ← zero or more spaces
       while (self.currentToken().type == .WHITE_SPACE) {
-          const white_space_token = try self.expect(.WHITE_SPACE);
-          try complete_value.appendSlice(white_space_token.value);
+        const white_space_token = try self.expect(.WHITE_SPACE);
+        try complete_value.appendSlice(white_space_token.value);
       }
 
-      // Step 2: After consuming all whitespace, expect exactly one VALUE_TOKEN.
-      // VALUE_TOKEN ← exactly one value token after all that whitespace
-      const value_token = try self.parseValueToken();
-      try complete_value.appendSlice(value_token.value);
+      // Check if we can parse another VALUE_TOKEN
+      const current_token = self.currentToken();
 
-      // Add value token as a child:
-      try children.append(value_token);
+      const is_value_token_terminal = current_token.type == .WORD or
+          current_token.type == .DOUBLE_QUOTED_STRING or
+          current_token.type == .SINGLE_QUOTED_STRING;
+
+      if (is_value_token_terminal) {
+          // Collect the value token:
+          const value_token = try self.parseValueToken();
+          try complete_value.appendSlice(value_token.value);
+
+          // Add value token as a child:
+          try children.append(value_token);
+      } else {
+          // No more VALUE_TOKENs, exit the loop
+          break;
+      }
     }
 
     // Return the whole unquoted string:
