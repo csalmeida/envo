@@ -98,6 +98,40 @@ const Lexer = struct {
       else      => return DelimiterType.UNKNOWN,
     }
   }
+  /// Determines if a quote character at the given position is escaped by backslashes.
+  ///
+  /// This function counts consecutive backslashes immediately preceding the quote position.
+  /// If there's an odd number of backslashes, the quote is considered escaped and should
+  /// be treated as a literal character rather than a string delimiter.
+  ///
+  /// Examples:
+  /// - `\"` - Quote is escaped (1 backslash = odd)
+  /// - `\\"` - Quote is NOT escaped (2 backslashes = even, so the backslashes escape each other)
+  /// - `\\\"` - Quote is escaped (3 backslashes = odd)
+  ///
+  /// Arguments:
+  /// - `contents`: The full byte sequence being tokenized
+  /// - `quote_position`: The index position of the quote character to check
+  ///
+  /// Returns:
+  /// - `true` if the quote is escaped and should be treated as a literal character
+  /// - `false` if the quote is not escaped and should be treated as a string delimiter
+  fn isQuoteEscaped(_: *Lexer, contents: []const u8, quote_position: usize) bool {
+      if (quote_position == 0) return false;
+
+      var backslash_count: usize = 0;
+      var position = quote_position - 1;
+
+      // Count consecutive backslashes going backward:
+      while (position >= 0 and contents[position] == '\\') {
+          backslash_count += 1;
+          if (position == 0) break;
+          position -= 1;
+      }
+
+      // Odd number of backslashes means the quote is escaped
+      return (backslash_count % 2) == 1;
+  }
 };
 
 /// Looks at the `.env` file contents and categorizes each piece into symbols.
@@ -126,7 +160,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
     const previous_byte: ?u8 = if (index == 0) null else contents[index - 1];
 
     // If the current byte is a double / single quote it means it could be a closing quote if it's not escaped.
-    const previous_character_is_backslash: bool = if (previous_byte) |prev_byte| prev_byte == '\\' else false;
+    const is_quote_escaped: bool = lexer.isQuoteEscaped(contents, index);
 
     // Determines which type of delimiter we found. This might be unknown which means it's probably part of a `WORD`.
     const delimiter: DelimiterType = lexer.delimiterType(previous_byte, byte);
@@ -136,7 +170,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
       .DOUBLE_QUOTATION => {
         if (byte == '\"') {
           // If this quote is being escaped it is part of the current string we are trying to wrap.
-          if (previous_character_is_backslash) {
+          if (is_quote_escaped) {
             try bytes_accumulator.append(byte);
           } else {
             // Add the quote to the accumulator as the first one will be there as well, we are not losing the quotes.
@@ -164,7 +198,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
       .SINGLE_QUOTATION => {
         if (byte == '\'') {
-          if (previous_character_is_backslash) {
+          if (is_quote_escaped) {
             try bytes_accumulator.append(byte);
           } else {
             try bytes_accumulator.append(byte);
@@ -272,7 +306,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
     }
 
     // Given it is in normal mode we need to switch modes at that point to quoted unless its escaped:
-    const is_beginning_of_quoted_string = is_quote and !previous_character_is_backslash and lexer.mode == .NORMAL;
+    const is_beginning_of_quoted_string = is_quote and !is_quote_escaped and lexer.mode == .NORMAL;
     if (is_beginning_of_quoted_string) {
       // Consume any left over bytes as a word token:
       if (bytes_accumulator.items.len > 0) {
