@@ -202,29 +202,38 @@ const Parser = struct {
   /// Parses a grammar rule:
   /// <FILE_CONTENTS> ::= NEW_LINE* <STATEMENT>* END_OF_FILE
   fn parseFileContents(self: *Parser) !ASTNode {
-    var children_nodes = ASTArrayList.init(self.allocator);
+      var children_nodes = ASTArrayList.init(self.allocator);
 
-    // Consume any leading blank lines before looking for statements:
-    while (self.currentToken().type == .NEW_LINE) {
-      _ = try self.expect(.NEW_LINE);
-    }
+      // Consume any leading blank lines before looking for statements:
+      while (self.currentToken().type == .NEW_LINE) {
+          _ = try self.expect(.NEW_LINE);
+      }
 
-    // .currentToken() needs to run on each iteration to change in when it is updated.
-    while (self.currentToken().type != .END_OF_FILE) {
-      const statement_ast_node = try self.parseStatement();
+      while (self.currentToken().type != .END_OF_FILE) {
+          // Consume leading whitespace
+          while (self.currentToken().type == .WHITE_SPACE) {
+              _ = try self.expect(.WHITE_SPACE);
+          }
 
-      // We want to add each statement to an array of children.
-      try children_nodes.append(statement_ast_node);
-    }
+          // If we hit a newline, it's a whitespace-only line - consume and continue
+          if (self.currentToken().type == .NEW_LINE) {
+              _ = try self.expect(.NEW_LINE);
+              continue;
+          }
 
-    // Once all the potential available statements are done, we expect EOF.
-    _ = try self.expect(.END_OF_FILE);
+          // Otherwise parse as normal statement
+          const statement_ast_node = try self.parseStatement();
+          try children_nodes.append(statement_ast_node);
+      }
 
-    return ASTNode {
-      .type = .FILE_CONTENTS,
-      .value = "",
-      .children = children_nodes.items,
-    };
+      // Once all the potential available statements are done, we expect EOF.
+      _ = try self.expect(.END_OF_FILE);
+
+      return ASTNode {
+          .type = .FILE_CONTENTS,
+          .value = "",
+          .children = children_nodes.items,
+      };
   }
 
   /// Parses a grammar rule:
