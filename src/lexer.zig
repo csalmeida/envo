@@ -91,11 +91,11 @@ const Lexer = struct {
 
     // Any other delimiter is classified here:
     switch (current_byte) {
-      '\n' => return DelimiterType.LF_NEW_LINE,
-      '=' =>  return DelimiterType.EQUALS,
-      ' ' =>  return DelimiterType.WHITE_SPACE,
-      '#' =>  return DelimiterType.HASH_SIGN,
-      else => return DelimiterType.UNKNOWN,
+      '\n'      => return DelimiterType.LF_NEW_LINE,
+      '='       => return DelimiterType.EQUALS,
+      ' ', '\t' => return DelimiterType.WHITE_SPACE, // The space and tab character are both counted as white space.
+      '#'       => return DelimiterType.HASH_SIGN,
+      else      => return DelimiterType.UNKNOWN,
     }
   }
 };
