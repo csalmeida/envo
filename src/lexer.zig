@@ -190,6 +190,11 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
           continue;
         } else {
+          // Check if this is a new line byte inside a quote, just in case because we migh need to count a new line here:
+          if (delimiter == .LF_NEW_LINE or delimiter == .CRLF_NEW_LINE) {
+            lexer.line = lexer.line + 1;
+          }
+
           // If we are in quotation mode and we do not need to close the string off let's keep adding to the delimiter.
           try bytes_accumulator.append(byte);
           continue;
@@ -215,6 +220,11 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
           continue;
         } else {
+          // Check if this is a new line byte inside a quote, just in case because we migh need to count a new line here:
+          if (delimiter == .LF_NEW_LINE or delimiter == .CRLF_NEW_LINE) {
+            lexer.line = lexer.line + 1;
+          }
+
           try bytes_accumulator.append(byte);
           continue;
         }
