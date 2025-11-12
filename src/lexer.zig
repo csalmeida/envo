@@ -179,10 +179,11 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
   };
 
   // Stores all tokens in the order they were found.
-  var tokens = ArrayList(Token).init(allocator);
+  var tokens: ArrayList(Token) = .empty;
 
   // Keeps track of a number of bytes to idenfity tokens that are composed of many characters.
-  var bytes_accumulator = ArrayList(u8).init(allocator);
+  var bytes_accumulator: ArrayList(u8) = .empty;
+  defer bytes_accumulator.deinit(allocator);
 
   // Used to determine when the column actually starts by updating it when a byte is appended to the accumulator.
   var word_start_column: usize = 1;
@@ -209,28 +210,30 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
         if (byte == '\"') {
           // If this quote is being escaped it is part of the current string we are trying to wrap.
           if (is_quote_escaped) {
-            try bytes_accumulator.append(byte);
+            try bytes_accumulator.append(allocator, byte);
             if (bytes_accumulator.items.len == 1) {
                 // This is the first byte of a new token, so capture the current column
                 word_start_column = lexer.column;
             }
           } else {
             // Add the quote to the accumulator as the first one will be there as well, we are not losing the quotes.
-            try bytes_accumulator.append(byte);
+            try bytes_accumulator.append(allocator, byte);
             if (bytes_accumulator.items.len == 1) {
                 // This is the first byte of a new token, so capture the current column
                 word_start_column = lexer.column;
             }
 
             // Create the token and clear the accumulator.
-            try tokens.append(Token {
+            try tokens.append(
+              allocator,
+              Token {
               .type = .DOUBLE_QUOTED_STRING,
               .value = try allocator.dupe(u8, bytes_accumulator.items),
               .line = lexer.quote_start_line,
               .column = lexer.quote_start_column,
             });
 
-            bytes_accumulator.clearAndFree();
+            bytes_accumulator.clearAndFree(allocator);
 
             // We go back to normal as we captured the whole sequence now.
             lexer.mode = .NORMAL;
@@ -242,7 +245,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
           lexer.advanceLine(delimiter);
 
           // If we are in quotation mode and we do not need to close the string off let's keep adding to the delimiter.
-          try bytes_accumulator.append(byte);
+          try bytes_accumulator.append(allocator, byte);
           continue;
         }
       },
@@ -250,18 +253,20 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
       .SINGLE_QUOTATION => {
         if (byte == '\'') {
           if (is_quote_escaped) {
-            try bytes_accumulator.append(byte);
+            try bytes_accumulator.append(allocator, byte);
           } else {
-            try bytes_accumulator.append(byte);
+            try bytes_accumulator.append(allocator, byte);
 
-            try tokens.append(Token {
+            try tokens.append(
+              allocator,
+              Token {
               .type = .SINGLE_QUOTED_STRING,
               .value = try allocator.dupe(u8, bytes_accumulator.items),
               .line = lexer.quote_start_line,
               .column = lexer.quote_start_column,
             });
 
-            bytes_accumulator.clearAndFree();
+            bytes_accumulator.clearAndFree(allocator);
 
             lexer.mode = .NORMAL;
           }
@@ -271,7 +276,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
           // Check if this is a new line byte inside a quote, just in case because we migh need to count a new line here:
           lexer.advanceLine(delimiter);
 
-          try bytes_accumulator.append(byte);
+          try bytes_accumulator.append(allocator, byte);
           continue;
         }
       },
@@ -302,7 +307,9 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
     //    We want to ignore tokenising them in quotes mode as they are part of the final value in that case.
     if (is_delimiter and lexer.mode == .NORMAL) {
       if (bytes_accumulator.items.len > 0) {
-        try tokens.append(Token {
+        try tokens.append(
+          allocator,
+          Token {
           .type = .WORD,
           .value = try allocator.dupe(u8, bytes_accumulator.items), // We need to make a copy here, otherwise a free will make these unavailable.
           .line = lexer.line,
@@ -310,7 +317,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
         });
 
         // Clears the accumulator, not sure if it's still usable after that but we will find out.
-        bytes_accumulator.clearAndFree();
+        bytes_accumulator.clearAndFree(allocator);
       }
 
       // When we hit a delimiter we create a token and move on to the next iteration.
@@ -330,8 +337,8 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
           // Increments after the token is formed.
           lexer.advanceLine(delimiter);
 
-          // Then call tokens.append(token) and move to the next iteration of the loop
-          try tokens.append(token);
+          // Then call tokens.append(allocator, token) and move to the next iteration of the loop
+          try tokens.append(allocator, token);
           continue;
         },
 
@@ -343,7 +350,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
             .column = lexer.column,
           };
 
-          try tokens.append(token);
+          try tokens.append(allocator, token);
           continue;
         },
 
@@ -355,7 +362,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
             .column = lexer.column,
           };
 
-          try tokens.append(token);
+          try tokens.append(allocator, token);
           continue;
         },
 
@@ -379,7 +386,9 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
       // Consume any left over bytes as a word token:
       if (bytes_accumulator.items.len > 0) {
-        try tokens.append(Token {
+        try tokens.append(
+          allocator,
+          Token {
           .type = .WORD,
           .value = try allocator.dupe(u8, bytes_accumulator.items), // We need to make a copy here, otherwise a free will make these unavailable.
           .line = lexer.line,
@@ -387,7 +396,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
         });
 
         // Clears the accumulator, not sure if it's still usable after that but we will find out.
-        bytes_accumulator.clearAndFree();
+        bytes_accumulator.clearAndFree(allocator);
       }
 
       // Switches to quoted mode:
@@ -396,7 +405,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
     // It did not hit a delimiter character so we add the character to the accumulator.
     // The delimiters wouldn't get added to the list because the loop does not each this stage due to the continue words right?
-    try bytes_accumulator.append(byte);
+    try bytes_accumulator.append(allocator, byte);
     if (bytes_accumulator.items.len == 1) {
         word_start_column = lexer.column;
     }
@@ -420,18 +429,20 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
   // At this point the file probably reached the end, we can check if there's another word in the accumulator and then flush it one last time.
   if (bytes_accumulator.items.len > 0) {
-    try tokens.append(Token {
+    try tokens.append(allocator,
+      Token {
       .type = .WORD,
       .value = try allocator.dupe(u8, bytes_accumulator.items),
       .line = lexer.line,
       .column = word_start_column,
     });
 
-    bytes_accumulator.clearAndFree();
+    bytes_accumulator.clearAndFree(allocator);
   }
 
   // Once we are done iterating through all characters we add a EOF token and return the list.
   try tokens.append(
+    allocator,
     Token {
       .type = TokenType.END_OF_FILE,
       .value = "",
@@ -457,7 +468,7 @@ pub fn freeTokens(allocator: Allocator, tokens: *ArrayList(Token)) void {
     }
   }
 
-  tokens.clearAndFree();
+  tokens.clearAndFree(allocator);
 }
 
 // TESTS

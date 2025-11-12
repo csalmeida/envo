@@ -202,7 +202,7 @@ const Parser = struct {
   /// Parses a grammar rule:
   /// <FILE_CONTENTS> ::= NEW_LINE* <STATEMENT>* END_OF_FILE
   fn parseFileContents(self: *Parser) !ASTNode {
-      var children_nodes = ASTArrayList.init(self.allocator);
+      var children_nodes: ASTArrayList = .empty;
 
       // Consume any leading blank lines before looking for statements:
       while (self.currentToken().type == .NEW_LINE) {
@@ -223,7 +223,7 @@ const Parser = struct {
 
           // Otherwise parse as normal statement
           const statement_ast_node = try self.parseStatement();
-          try children_nodes.append(statement_ast_node);
+          try children_nodes.append(self.allocator, statement_ast_node);
       }
 
       // Once all the potential available statements are done, we expect EOF.
@@ -350,18 +350,18 @@ const Parser = struct {
   fn parseMixedContent(self: *Parser) !ASTNode {
     // We do not want to free complete_value or children now - the arena allocator will be freed later by the caller
     // when they're done with the AST, which will free all tokens, ASTNodes, and other allocated values.
-    var complete_value = std.ArrayList(u8).init(self.allocator);
+    var complete_value: std.ArrayList(u8) = .empty;
 
     // A <MIXED_CONTENT> can have multiple <VALUE_TOKEN> ASTNodes:
-    var children = std.ArrayList(ASTNode).init(self.allocator);
+    var children: std.ArrayList(ASTNode) = .empty;
 
     // Attempt to find a value token:
     const first_value_token = try self.parseValueToken();
     // Append it to our final string:
-    try complete_value.appendSlice(first_value_token.value);
+    try complete_value.appendSlice(self.allocator, first_value_token.value);
 
     // Add value token as a child:
-    try children.append(first_value_token);
+    try children.append(self.allocator, first_value_token);
 
     // Keep parsing the remaining value tokens and white space.
     while (true) {
@@ -369,7 +369,7 @@ const Parser = struct {
       // WHITE_SPACE* ← zero or more spaces
       while (self.currentToken().type == .WHITE_SPACE) {
         const white_space_token = try self.expect(.WHITE_SPACE);
-        try complete_value.appendSlice(white_space_token.value);
+        try complete_value.appendSlice(self.allocator, white_space_token.value);
       }
 
       // Check if we can parse another VALUE_TOKEN
@@ -382,10 +382,10 @@ const Parser = struct {
       if (is_value_token_terminal) {
           // Collect the value token:
           const value_token = try self.parseValueToken();
-          try complete_value.appendSlice(value_token.value);
+          try complete_value.appendSlice(self.allocator, value_token.value);
 
           // Add value token as a child:
-          try children.append(value_token);
+          try children.append(self.allocator, value_token);
       } else {
           // No more VALUE_TOKENs, exit the loop
           break;
