@@ -478,7 +478,7 @@ pub fn freeTokens(allocator: Allocator, tokens: *ArrayList(Token)) void {
 // TESTS
 const testing = std.testing;
 
-test "empty file" {
+test "can parse empty file" {
   const contents = "";
   const allocator = testing.allocator;
   var tokenList = try tokenise(allocator, contents);
@@ -489,7 +489,7 @@ test "empty file" {
   try testing.expect(tokens[0].type == .END_OF_FILE);
 }
 
-test "white space only file" {
+test "can parse white space only file" {
   const contents = "     \n      \n   ";
   const allocator = testing.allocator;
   var tokenList = try tokenise(allocator, contents);
@@ -530,7 +530,7 @@ test "comments only file skips all comments" {
   try testing.expect(tokens[1].type == .END_OF_FILE);
 }
 
-test "simple unquoted values" {
+test "supports simple unquoted values" {
   const contents =
   \\DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
   \\API_VERSION=v2.1.3
@@ -581,7 +581,7 @@ test "simple unquoted values" {
   try testing.expect(tokens[25].type == .END_OF_FILE);
 }
 
-test "simple double quoted strings" {
+test "supports simple double quoted strings" {
   const contents =
   \\DATABASE_URL="postgresql://user:pass@localhost:5432/mydb"
   \\API_VERSION="v2.1.3"
@@ -615,7 +615,7 @@ test "simple double quoted strings" {
   try testing.expect(tokens[11].type == .END_OF_FILE);
 }
 
-test "simple single quoted strings" {
+test "supports simple single quoted strings" {
   const contents =
   \\DATABASE_URL='postgresql://user:pass@localhost:5432/mydb'
   \\API_VERSION='v2.1.3'
@@ -649,7 +649,7 @@ test "simple single quoted strings" {
   try testing.expect(tokens[11].type == .END_OF_FILE);
 }
 
-test "double quoted strings with delimiters" {
+test "supports double quoted strings with delimiters" {
   const contents =
   \\DATABASE_URL="postgresql://user:pass@localhost:5432/mydb"
   \\MESSAGE="Hello world with spaces and = equals"
@@ -691,7 +691,7 @@ test "double quoted strings with delimiters" {
   try testing.expect(tokens[15].type == .END_OF_FILE);
 }
 
-test "single quoted strings with delimiters" {
+test "supports single quoted strings with delimiters" {
   const contents =
   \\DATABASE_URL='postgresql://user:pass@localhost:5432/mydb'
   \\MESSAGE='Hello world with spaces and = equals'
@@ -734,7 +734,7 @@ test "single quoted strings with delimiters" {
 }
 
 // Should have KEY as WORD, = as EQUALS, unterminated quote as WORD, and EOF:
-test "unterminated double quotes result in word token" {
+test "supports unterminated double quotes result in word token" {
   const contents =
   \\KEY="never closes
   ;
@@ -755,7 +755,7 @@ test "unterminated double quotes result in word token" {
 }
 
 // Should have KEY as WORD, = as EQUALS, unterminated quote as WORD, and EOF:
-test "unterminated single quotes result in word token" {
+test "supports unterminated single quotes result in word token" {
   const contents =
   \\KEY='never closes
   ;
@@ -775,7 +775,7 @@ test "unterminated single quotes result in word token" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "empty double quoted strings" {
+test "supports empty double quoted strings" {
   const contents =
   \\KEY=""
   ;
@@ -795,7 +795,7 @@ test "empty double quoted strings" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "empty single quoted strings" {
+test "supports empty single quoted strings" {
   const contents =
   \\KEY=''
   ;
@@ -815,7 +815,7 @@ test "empty single quoted strings" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "escaped double quotes" {
+test "supports escaped double quotes" {
   const contents =
   \\KEY="She said \"hello\""
   ;
@@ -835,7 +835,7 @@ test "escaped double quotes" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "escaped single quotes" {
+test "supports escaped single quotes" {
   const contents =
   \\KEY='She said \'hello\''
   ;
@@ -855,7 +855,7 @@ test "escaped single quotes" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "escaped backslashes in double quotes" {
+test "supports escaped backslashes in double quotes" {
   const contents =
   \\KEY="Path\\to\\file"
   ;
@@ -875,7 +875,7 @@ test "escaped backslashes in double quotes" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "escaped backslashes in single quotes" {
+test "supports escaped backslashes in single quotes" {
   const contents =
   \\KEY='Path\\to\\file'
   ;
@@ -895,7 +895,7 @@ test "escaped backslashes in single quotes" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "mixed escapes in double quotes" {
+test "supports mixed escapes in double quotes" {
   const contents =
   \\KEY="Line 1\nLine 2\tTabbed"
   ;
@@ -915,7 +915,7 @@ test "mixed escapes in double quotes" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "mixed escapes in single quotes" {
+test "supports mixed escapes in single quotes" {
   const contents =
   \\KEY='Line 1\nLine 2\tTabbed'
   ;
@@ -935,7 +935,7 @@ test "mixed escapes in single quotes" {
   try testing.expect(tokens[3].type == .END_OF_FILE);
 }
 
-test "inline comments" {
+test "supports inline comments" {
   const contents =
   \\KEY=value # This is a comment
   ;
@@ -956,7 +956,7 @@ test "inline comments" {
   try testing.expect(tokens[4].type == .END_OF_FILE);
 }
 
-test "comments with quotes" {
+test "supports comments with quotes" {
   const contents =
   \\# This "quote" is in a comment
   ;
@@ -973,7 +973,7 @@ test "comments with quotes" {
   try testing.expect(tokens[0].type == .END_OF_FILE);
 }
 
-test "hash in double quoted string" {
+test "supports hash in double quoted string" {
   const contents =
   \\ PASSWORD="secret#123"
   ;
@@ -994,7 +994,7 @@ test "hash in double quoted string" {
   try testing.expect(tokens[4].type == .END_OF_FILE);
 }
 
-test "hash in single quoted string" {
+test "supports hash in single quoted string" {
   const contents =
   \\ PASSWORD='secret#123'
   ;
@@ -1015,7 +1015,7 @@ test "hash in single quoted string" {
   try testing.expect(tokens[4].type == .END_OF_FILE);
 }
 
-test "unquoted values with double quotes" {
+test "supports unquoted values with double quotes" {
   const contents =
   \\She said "hello" today
   ;
@@ -1039,7 +1039,7 @@ test "unquoted values with double quotes" {
   try testing.expect(tokens[7].type == .END_OF_FILE);
 }
 
-test "unquoted values with single quotes" {
+test "supports unquoted values with single quotes" {
   const contents =
   \\She said 'hello' today
   ;
@@ -1063,7 +1063,7 @@ test "unquoted values with single quotes" {
   try testing.expect(tokens[7].type == .END_OF_FILE);
 }
 
-test "mixed quote types" {
+test "supports mixed quote types" {
   const contents =
   \\KEY="outer 'inner' quotes"
   ;
@@ -1173,15 +1173,15 @@ test "lexer correctly counts columns" {
       .{ .line = 1, .col = 1 },   // CERTIFICATE
       .{ .line = 1, .col = 12 },  // =
       .{ .line = 1, .col = 13 },  // "-----BEGIN CERTIFICATE-----..."
-      .{ .line = 3, .col = 27 },   // NEW_LINE (after certificate ends on line 3)
+      .{ .line = 3, .col = 27 },  // NEW_LINE (after certificate ends on line 3)
       .{ .line = 4, .col = 1 },   // SUPER
       .{ .line = 4, .col = 6 },   // =
       .{ .line = 4, .col = 7 },   // "hello"
-      .{ .line = 4, .col = 14 },   // NEW_LINE (after hello on line 4)
+      .{ .line = 4, .col = 14 },  // NEW_LINE (after hello on line 4)
       .{ .line = 5, .col = 1 },   // SSH_KEY
       .{ .line = 5, .col = 8 },   // =
       .{ .line = 5, .col = 9 },   // "-----BEGIN OPENSSH PRIVATE KEY-----..."
-      .{ .line = 8, .col = 35 },   // NEW_LINE (after SSH key ends on line 8)
+      .{ .line = 8, .col = 35 },  // NEW_LINE (after SSH key ends on line 8)
       .{ .line = 9, .col = 1 },   // END_OF_FILE
   };
 
