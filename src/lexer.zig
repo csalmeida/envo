@@ -97,7 +97,7 @@ const Lexer = struct {
     const found_new_line = delimiter == .LF_NEW_LINE or delimiter == .CRLF_NEW_LINE;
     if (found_new_line) {
       self.line += 1;
-      self.column = 1;
+      self.column = 0;
     }
   }
 
@@ -172,7 +172,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
   // Mutable lexer as we update it when iterating through contents.
   var lexer = Lexer {
     .line = 1,
-    .column = 1,
+    .column = 0,
     .quote_start_line = 1,
     .quote_start_column = 1,
     .mode = .NORMAL,
@@ -191,6 +191,12 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
   // Contents are UTF-8 sequence of bytes containing character representation.
   // A byte might be a single character of just part of the represenation of a full character, up to 4 bytes.
   for (contents, 0..) |byte, index| {
+    // Update column count on each byte.
+    // Count starts at 0 so that it remains accurate and
+    // function is placed here to keep advanceLine() from
+    // reseting the column count on NEW_LINE tokens.
+    lexer.advanceColumn();
+
     // If it is the last byte we want to return to normal mode.
     // In quotation mode if no closing quote was found that just becomes a word.
     const is_last_byte = (contents.len - 1) == index;
@@ -410,15 +416,10 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
         word_start_column = lexer.column;
     }
 
-
     // If it's the last byte switch to normal mode.
     if (is_last_byte) {
       lexer.mode = .NORMAL;
     }
-
-    // Update column count on each byte.
-    // Has to be done at the end after the byte had been processed.
-    lexer.advanceColumn();
 
     // Capture the quote start column after advancing
     // Avoids quoted tokens having the same column as previous token.
@@ -439,6 +440,9 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
     bytes_accumulator.clearAndFree(allocator);
   }
+
+  // Advance the column from 0 to 1 so for the EOF token:
+  lexer.advanceColumn();
 
   // Once we are done iterating through all characters we add a EOF token and return the list.
   try tokens.append(
@@ -1169,15 +1173,15 @@ test "lexer correctly counts columns" {
       .{ .line = 1, .col = 1 },   // CERTIFICATE
       .{ .line = 1, .col = 12 },  // =
       .{ .line = 1, .col = 13 },  // "-----BEGIN CERTIFICATE-----..."
-      .{ .line = 3, .col = 1 },   // NEW_LINE (after certificate ends on line 3)
+      .{ .line = 3, .col = 27 },   // NEW_LINE (after certificate ends on line 3)
       .{ .line = 4, .col = 1 },   // SUPER
       .{ .line = 4, .col = 6 },   // =
       .{ .line = 4, .col = 7 },   // "hello"
-      .{ .line = 4, .col = 7 },   // NEW_LINE (after hello on line 4)
+      .{ .line = 4, .col = 14 },   // NEW_LINE (after hello on line 4)
       .{ .line = 5, .col = 1 },   // SSH_KEY
       .{ .line = 5, .col = 8 },   // =
       .{ .line = 5, .col = 9 },   // "-----BEGIN OPENSSH PRIVATE KEY-----..."
-      .{ .line = 8, .col = 1 },   // NEW_LINE (after SSH key ends on line 8)
+      .{ .line = 8, .col = 35 },   // NEW_LINE (after SSH key ends on line 8)
       .{ .line = 9, .col = 1 },   // END_OF_FILE
   };
 
