@@ -18,7 +18,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 /// Describes available token types.
-/// Each type gives an indication what a group of bytes is in the file,
+/// Each type names a group of bytes in the file,
 /// without giving it any actualy meaning beyond categorization.
 pub const TokenType = enum {
   WORD,
@@ -30,7 +30,7 @@ pub const TokenType = enum {
   SINGLE_QUOTED_STRING
 };
 
-/// Used to represent each symbol found the file.
+/// Used to represent each symbol found in the file.
 /// Contains the token type (category) and the actual byte sequence from the source.
 /// Assigns the value found with the token type.
 pub const Token = struct {
@@ -71,10 +71,10 @@ const LexerMode = enum {
 const Lexer = struct {
   mode: LexerMode,
 
-  line: u16, // Limits itself to u16 as an .env file likely won't have more than 65,536 lines.
+  line: u16, // Limits line count to u16 as an .env file likely won't have more than 65,536 lines.
   column: usize, // This can be a high number.
 
-  // The following numbers keep to be recorded since quotes values can be multiline and the line number should correspond to the starting line of the token, not where it ends.
+  // The following numbers need to be recorded since quoted values can be multiline and the line number should correspond to the starting line of the token, not where it ends.
   quote_start_line: u16,
   quote_start_column: usize,
 
@@ -188,7 +188,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
   // Used to determine when the column actually starts by updating it when a byte is appended to the accumulator.
   var word_start_column: usize = 1;
 
-  // Contents are UTF-8 sequence of bytes containing character representation.
+  // Contents are UTF-8 sequences of bytes containing character representation.
   // A byte might be a single character of just part of the represenation of a full character, up to 4 bytes.
   for (contents, 0..) |byte, index| {
     // Update column count on each byte.
@@ -210,7 +210,8 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
     // Determines which type of delimiter we found. This might be unknown which means it's probably part of a `WORD`.
     const delimiter: DelimiterType = lexer.delimiterType(previous_byte, byte);
 
-    // My thinking here is at this point the lexer might already be in quotation mode so we can handle the byte sequence and create a token then, what do you think?
+    // The lexer might be in quotation mode at this point.
+    // If so we can process the byte sequenceand create the appropriate token for it.
     switch (lexer.mode) {
       .DOUBLE_QUOTATION => {
         if (byte == '\"') {
@@ -289,7 +290,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
       // If the lexer finds itself in skip mode it's because a comment delimiter was picked up.
       // Here we check if the current delimiter found is a new line, this is where we stop ignoring contents and return to normal mode.
-      // As a side effect the delimiter logic will handle adding the new line token to the list.
+      // As a side effect, the delimiter logic will handle adding the new line token to the list.
       .SKIP => {
         if (delimiter == .LF_NEW_LINE or delimiter == .CRLF_NEW_LINE) {
           lexer.mode = .NORMAL;
@@ -308,7 +309,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 
     // If we hit a delimiter that can be tokenised and we are in normal mode we do the following:
     // 1. Check if we have a value in the buffer and turn it into a `WORD` token.
-    // 2. Clear the accumulator so that we start collecting for the next potential work or quoted token.
+    // 2. Clear the accumulator so that we start collecting for the next potential word or quoted token.
     // 3. In all cases we tokenise the delimiter byte and add it to our tokens list.
     //    We want to ignore tokenising them in quotes mode as they are part of the final value in that case.
     if (is_delimiter and lexer.mode == .NORMAL) {
@@ -317,12 +318,12 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
           allocator,
           Token {
           .type = .WORD,
-          .value = try allocator.dupe(u8, bytes_accumulator.items), // We need to make a copy here, otherwise a free will make these unavailable.
+          .value = try allocator.dupe(u8, bytes_accumulator.items), // We need to make a copy here, otherwise a `free` will make these unavailable.
           .line = lexer.line,
           .column = word_start_column,
         });
 
-        // Clears the accumulator, not sure if it's still usable after that but we will find out.
+        // Clears the accumulator because the value was passed to the token.
         bytes_accumulator.clearAndFree(allocator);
       }
 
@@ -331,7 +332,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
       switch (delimiter) {
         .LF_NEW_LINE,
         .CRLF_NEW_LINE => {
-          // Instantiate Token with TokenType.NEW_LINE and add it to the list when I work out what I can do with the allocator.
+          // Compose a .NEW_LINE token.
           const token = Token {
             .type = .NEW_LINE,
             .value = if (delimiter == .LF_NEW_LINE) "\n" else "\r\n", // We know the value we are just going to assign it.
@@ -343,7 +344,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
           // Increments after the token is formed.
           lexer.advanceLine(delimiter);
 
-          // Then call tokens.append(allocator, token) and move to the next iteration of the loop
+          // Adds token to the list and moves to the next iteration of the loop.
           try tokens.append(allocator, token);
           continue;
         },
@@ -396,12 +397,11 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
           allocator,
           Token {
           .type = .WORD,
-          .value = try allocator.dupe(u8, bytes_accumulator.items), // We need to make a copy here, otherwise a free will make these unavailable.
+          .value = try allocator.dupe(u8, bytes_accumulator.items),
           .line = lexer.line,
           .column = word_start_column,
         });
 
-        // Clears the accumulator, not sure if it's still usable after that but we will find out.
         bytes_accumulator.clearAndFree(allocator);
       }
 
@@ -410,7 +410,6 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
     }
 
     // It did not hit a delimiter character so we add the character to the accumulator.
-    // The delimiters wouldn't get added to the list because the loop does not each this stage due to the continue words right?
     try bytes_accumulator.append(allocator, byte);
     if (bytes_accumulator.items.len == 1) {
         word_start_column = lexer.column;
@@ -421,7 +420,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
       lexer.mode = .NORMAL;
     }
 
-    // Capture the quote start column after advancing
+    // Capture the quote start column after advancing.
     // Avoids quoted tokens having the same column as previous token.
     if (is_beginning_of_quoted_string) {
       lexer.quote_start_column = lexer.column;
@@ -444,7 +443,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
   // Advance the column from 0 to 1 so for the EOF token:
   lexer.advanceColumn();
 
-  // Once we are done iterating through all characters we add a EOF token and return the list.
+  // Once we are done iterating through all characters we add an EOF token and return the list.
   try tokens.append(
     allocator,
     Token {
@@ -459,7 +458,7 @@ pub fn tokenise(allocator: Allocator, contents: []const u8) TokenizationError!Ar
 }
 
 /// Since the token requires multiple allocations for each token value
-/// This helper frees up all values and then the token list allocations.
+/// this helper frees up all values and the token list allocations.
 pub fn freeTokens(allocator: Allocator, tokens: *ArrayList(Token)) void {
   for (tokens.items) |token| {
     switch (token.type) {
