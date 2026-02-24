@@ -39,7 +39,9 @@
 
 const std = @import("std");
 const lexer = @import("lexer.zig");
+
 const parse_rd = @import("strategies/recursive_descent.zig");
+const parse_it = @import("strategies/iterative.zig");
 
 const Allocator = std.mem.Allocator;
 pub const ASTArrayList = std.ArrayList(ASTNode);
@@ -50,8 +52,7 @@ const TokenArrayList = std.ArrayList(Token);
 
 const ParseStrategy = enum {
   RECURSIVE_DESCENT,
-  // .ITERATIVE, (coming soon).
-  // .TABLE_DRIVEN (coming soon).
+  ITERATIVE
 };
 
 const NoNTerminalSymbol = enum {
@@ -64,7 +65,7 @@ const NoNTerminalSymbol = enum {
   VALUE_TOKEN,
 };
 
-const ASTNodeType = NoNTerminalSymbol;
+pub const ASTNodeType = NoNTerminalSymbol;
 
 /// Represents a node in the Abstract Syntax Tree (AST).
 ///
@@ -181,7 +182,7 @@ pub const Parser = struct {
       return try self.allocator.alloc(ASTNode, 0);
   }
 
-  /// Entry point for recursive descent parsing strategy.
+  /// Entry point for the recursive descent parsing strategy.
   ///
   /// This method initiates the recursive descent parsing process by starting
   /// at the top-level grammar rule (FILE_CONTENTS) and recursively parsing
@@ -193,10 +194,21 @@ pub const Parser = struct {
   /// - Each parse method handles one grammar rule and calls other parse methods for sub-rules
   /// - Building the AST from the top down as each method creates its node and adds children
   ///
+  /// Uses the call stack but safe to use for most cases.
+  ///
   /// Returns: The root ASTNode representing the entire parsed file structure
   /// Errors: Returns ParseError if the token stream doesn't match the grammar
   fn parseRecursiveDescent(self: *Parser) !ASTNode {
-    const ast_root_node = try parse_rd.parseFileContents(self);
+    const ast_root_node = try parse_rd.parse(self);
+    return ast_root_node;
+  }
+
+  /// Entry point for the iterative parsing strategy.
+  ///
+  /// This method initiates an iterative parsing process by instantiating and managing its own call stack stored on the heap.
+  /// It enforces grammar and processes tokens building a tree of ASTNodes.
+  fn parseIterative(self: *Parser) !ASTNode {
+    const ast_root_node = try parse_it.parse(self);
     return ast_root_node;
   }
 };
@@ -211,8 +223,9 @@ pub fn parse(allocator: Allocator, contents: []const u8) !ASTNode {
   var parser = Parser.init(allocator, tokens.items);
 
   // Pick a strategy from the available ones.
-  const strategy = ParseStrategy.RECURSIVE_DESCENT;
+  const strategy = ParseStrategy.ITERATIVE;
   switch (strategy) {
       .RECURSIVE_DESCENT => return try parser.parseRecursiveDescent(),
+      .ITERATIVE => return try parser.parseIterative(),
   }
 }
