@@ -365,3 +365,31 @@ test "parsing works on file without trailing new line with iterative strategy" {
   // This case it should have 7 statements:
   try testing.expect(ast.children.len == 1);
 }
+
+test "returns error on invalid input with recursive descent strategy" {
+  const contents =
+  \\KEY value
+  ;
+
+  const allocator = testing.allocator;
+
+  var parse_arena = std.heap.ArenaAllocator.init(allocator);
+  defer parse_arena.deinit();
+
+  const result = parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
+  try testing.expectError(ParseError.UnexpectedToken, result);
+}
+
+test "returns error on invalid input with iterative strategy" {
+  const contents =
+  \\KEY value
+  ;
+
+  const allocator = testing.allocator;
+
+  var parse_arena = std.heap.ArenaAllocator.init(allocator);
+  defer parse_arena.deinit();
+
+  const result = parse(parse_arena.allocator(), .ITERATIVE, contents);
+  try testing.expectError(ParseError.UnexpectedToken, result);
+}
