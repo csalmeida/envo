@@ -63,7 +63,7 @@ fn parseFileContents(parser: *Parser) !ASTNode {
 }
 
 /// Parses a grammar rule:
-/// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE+
+/// <STATEMENT> ::= <ASSIGNMENT> WHITE_SPACE* (NEW_LINE+ | END_OF_FILE)
 fn parseStatement(parser: *Parser) !ASTNode {
   // Attempt to parse an assignment:
   const assignment_ast_node = try parseAssignment(parser);
@@ -77,12 +77,17 @@ fn parseStatement(parser: *Parser) !ASTNode {
     _ = try parser.expect(.WHITE_SPACE);
   }
 
-  // An assignment ends with a new line.
-  _ = try parser.expect(.NEW_LINE);
-
-  // Ignores any other new lines:
-  while (parser.currentToken().type == .NEW_LINE) {
-    _ = try parser.expect(.NEW_LINE);
+  // A statement ends with one or more new lines, or END_OF_FILE if it's the last statement.
+  if (parser.currentToken().type == .NEW_LINE) {
+      _ = try parser.expect(.NEW_LINE);
+      // Ignore any other new lines:
+      while (parser.currentToken().type == .NEW_LINE) {
+          _ = try parser.expect(.NEW_LINE);
+      }
+  } else if (parser.currentToken().type == .END_OF_FILE) {
+      // Valid - last statement in file, no trailing newline required.
+  } else {
+      return ParseError.UnexpectedToken;
   }
 
   return ASTNode {

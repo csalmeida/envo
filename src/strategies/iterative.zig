@@ -201,28 +201,34 @@ fn handleFileContents(parser: *Parser, stack: *CallStack, frame: *StackFrame) !v
 }
 
 /// Parses a grammar rule:
-/// <STATEMENT> ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE+
+/// <STATEMENT> ::= <ASSIGNMENT> WHITE_SPACE* (NEW_LINE+ | END_OF_FILE)
 fn handleStatement(parser: *Parser, stack: *CallStack, frame: *StackFrame) !void {
   switch (frame.step) {
     0 => {
+      // Moves to next step so that when the frame is done processing we continue parsing the statement.
+      // This needs to happen before the push to avoid pointer invalidation issues.
+      frame.step = 1;
+
       // Attempt to parse an assignment:
       const assignment_frame = StackFrame.init(parser.allocator, .ASSIGNMENT);
       try stack.push(assignment_frame);
-
-      // Moves to next step so that when the frame is done processing we continue parsing the statement.
-      frame.step = 1;
     },
     1 => {
       // Ignore any trailing .WHITE_SPACE by advancing until we find a `.NEW_LINE`:
       if (parser.currentToken().type == .WHITE_SPACE) {
         _ = try parser.expect(.WHITE_SPACE);
       } else {
-        // An assignment ends with a new line.
-        _ = try parser.expect(.NEW_LINE);
-
-        // Ignores any other new lines:
-        while (parser.currentToken().type == .NEW_LINE) {
-          _ = try parser.expect(.NEW_LINE);
+        // A statement ends with one or more new lines, or END_OF_FILE if it's the last statement.
+        if (parser.currentToken().type == .NEW_LINE) {
+            _ = try parser.expect(.NEW_LINE);
+            // Ignore any other new lines:
+            while (parser.currentToken().type == .NEW_LINE) {
+                _ = try parser.expect(.NEW_LINE);
+            }
+        } else if (parser.currentToken().type == .END_OF_FILE) {
+            // Valid - last statement in file, no trailing newline required.
+        } else {
+            return ParseError.UnexpectedToken;
         }
 
         // Done with this production, we can remove it from the stack:
@@ -238,11 +244,12 @@ fn handleStatement(parser: *Parser, stack: *CallStack, frame: *StackFrame) !void
 fn handleAssignment(parser: *Parser, stack: *CallStack, frame: *StackFrame) !void {
   switch (frame.step) {
     0 => {
+      // Move to the next step:
+      // This needs to happen before the push to avoid pointer invalidation issues.
+      frame.step = 1;
+
       // Signals that an identifier non terminal needs to be parsed:
       try stack.push(StackFrame.init(stack.allocator, .IDENTIFIER));
-
-      // Move to the next step:
-      frame.step = 1;
     },
     1=> {
       // We expect and consume whitespace tokens between the identifier and equals sign.
@@ -267,9 +274,11 @@ fn handleAssignment(parser: *Parser, stack: *CallStack, frame: *StackFrame) !voi
       frame.step = 2;
     },
     2 => {
+      // This needs to happen before the push to avoid pointer invalidation issues.
+      frame.step = 3;
+
       // Attempt to parse the value portion of the statement.
       try stack.push(StackFrame.init(stack.allocator, .VALUE));
-      frame.step = 3;
     },
     3 => {
       // Package the ASTNode for the next frame and remove the frame from the stack.
@@ -305,10 +314,11 @@ fn handleValue(parser: *Parser, stack: *CallStack, frame: *StackFrame) !void {
 
       switch (token.type) {
         .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
+          // This needs to happen before the push to avoid pointer invalidation issues.
+          frame.step = 1;
+
           const mixed_content_frame = StackFrame.init(stack.allocator, .MIXED_CONTENT);
           _ = try stack.push(mixed_content_frame);
-
-          frame.step = 1;
         },
         else => {
           // If it's not either of those it must be an empty value:
@@ -336,11 +346,12 @@ fn handleMixedContent(parser: *Parser, stack: *CallStack, frame: *StackFrame) !v
     // The value of this token needs to be appended to the frame as an accumulator as there might be more content that is part of the value in other tokens.
     // A <MIXED_CONTENT> can have multiple <VALUE_TOKEN> ASTNodes.
     0 => {
+      // This needs to happen before the push to avoid pointer invalidation issues.
+      frame.step = 1;
+
       // Attempt to find a value token:
       const first_value_frame = StackFrame.init(stack.allocator, .VALUE_TOKEN);
       _ = try stack.push(first_value_frame);
-
-      frame.step = 1;
     },
 
     1 => {
@@ -366,9 +377,12 @@ fn handleMixedContent(parser: *Parser, stack: *CallStack, frame: *StackFrame) !v
         } else if (parser.currentToken().type == .WORD or
                    parser.currentToken().type == .DOUBLE_QUOTED_STRING or
                    parser.currentToken().type == .SINGLE_QUOTED_STRING) {
+
+            // This needs to happen before the push to avoid pointer invalidation issues.
+            frame.step = 1;
+
             // Push VALUE_TOKEN, go back to step 1 to collect its result
             try stack.push(StackFrame.init(stack.allocator, .VALUE_TOKEN));
-            frame.step = 1;
         } else {
             // Done — set the frame's value from accumulated bytes and pop
             frame.value = try stack.allocator.dupe(u8, frame.bytes_accumulated.items);
