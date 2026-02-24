@@ -4,4 +4,4 @@ zig-out
 /docs
 
 # Assembly:
-libroot.a
+*.a
