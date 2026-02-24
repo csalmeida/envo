@@ -12,7 +12,7 @@
 ///
 /// Full grammar:
 /// <FILE_CONTENTS> ::= NEW_LINE* <STATEMENT>* END_OF_FILE
-/// <STATEMENT> ::= <ASSIGNMENT> WHITE_SPACE* NEW_LINE+
+/// <STATEMENT> ::= <ASSIGNMENT> WHITE_SPACE* (NEW_LINE+ | END_OF_FILE)
 /// <ASSIGNMENT> ::= <IDENTIFIER> WHITE_SPACE* EQUALS WHITE_SPACE* <VALUE>
 /// <IDENTIFIER> ::= WORD
 /// <VALUE> ::= <MIXED_CONTENT> | ε
@@ -226,17 +226,142 @@ pub const Parser = struct {
 
 /// Receives the contents of a file and returns an Abstract Syntax Tree of the input.
 /// If the structure is not compatible with the grammar it will fail and throw an error.
-pub fn parse(allocator: Allocator, contents: []const u8) !ASTNode {
+pub fn parse(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !ASTNode {
   // Turns contents into tokens:
   var tokens = try lexer.tokenise(allocator, contents);
   defer lexer.freeTokens(allocator, &tokens);
 
+  // Shares token list with parser.
   var parser = Parser.init(allocator, tokens.items);
 
-  // Pick a strategy from the available ones.
-  const strategy = ParseStrategy.ITERATIVE;
+  // Parse contents from an available parsing strategy.
   switch (strategy) {
       .RECURSIVE_DESCENT => return try parser.parseRecursiveDescent(),
       .ITERATIVE => return try parser.parseIterative(),
   }
+}
+
+// TESTS
+const testing = std.testing;
+
+test "generates correct AST with recursive descent strategy" {
+  const contents =
+  \\
+  \\# A comment which should be ignored. This file is used to test the most comment cases for this grammar.
+  \\unquoted=Envo
+  \\double_quoted="Envo"
+  \\single_quoted='Envo'
+  \\multiline="-----BEGIN CERTIFICATE-----
+  \\MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
+  \\-----END CERTIFICATE-----"
+  \\mixed_content=hello, she said "see you later" to 'Florencio'.
+  \\empty=
+  \\        white_space="                     "
+  \\
+  ;
+
+  const allocator = testing.allocator;
+
+  var parse_arena = std.heap.ArenaAllocator.init(allocator);
+  defer parse_arena.deinit();
+
+  const ast: ASTNode = try parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
+
+  // Root node needs to be file contents:
+  try testing.expect(ast.type == .FILE_CONTENTS);
+
+  // This case it should have 7 statements:
+  try testing.expect(ast.children.len == 7);
+
+  // Empty value needs to be am empty string.
+  const empty_statement = ast.children[5];
+  const empty_value = empty_statement.children[0].children[1]; // STATEMENT → ASSIGNMENT → VALUE
+  try testing.expect(empty_value.children.len == 0);
+  try testing.expectEqualStrings("", empty_value.value);
+
+  // Mixed content should include many value tokens as children, here we check if one of them is at the correct depth.
+  const mixed_statement = ast.children[4];
+  const mixed_value_token = mixed_statement.children[0].children[1].children[0].children[3];
+  // STATEMENT → ASSIGNMENT → VALUE → MIXED_CONTENT → VALUE_TOKEN (4th token)
+  try testing.expectEqualStrings("\"see you later\"", mixed_value_token.value);
+}
+
+test "generates correct AST with iterative strategy" {
+  const contents =
+  \\
+  \\# A comment which should be ignored. This file is used to test the most comment cases for this grammar.
+  \\unquoted=Envo
+  \\double_quoted="Envo"
+  \\single_quoted='Envo'
+  \\multiline="-----BEGIN CERTIFICATE-----
+  \\MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
+  \\-----END CERTIFICATE-----"
+  \\mixed_content=hello, she said "see you later" to 'Florencio'.
+  \\empty=
+  \\        white_space="                     "
+  \\
+  ;
+
+  const allocator = testing.allocator;
+
+  var parse_arena = std.heap.ArenaAllocator.init(allocator);
+  defer parse_arena.deinit();
+
+  const ast: ASTNode = try parse(parse_arena.allocator(), .ITERATIVE, contents);
+
+  // Root node needs to be file contents:
+  try testing.expect(ast.type == .FILE_CONTENTS);
+
+  // This case it should have 7 statements:
+  try testing.expect(ast.children.len == 7);
+
+  // Empty value needs to be am empty string.
+  const empty_statement = ast.children[5];
+  const empty_value = empty_statement.children[0].children[1]; // STATEMENT → ASSIGNMENT → VALUE
+  try testing.expect(empty_value.children.len == 0);
+  try testing.expectEqualStrings("", empty_value.value);
+
+  // Mixed content should include many value tokens as children, here we check if one of them is at the correct depth.
+  const mixed_statement = ast.children[4];
+  const mixed_value_token = mixed_statement.children[0].children[1].children[0].children[3];
+  // STATEMENT → ASSIGNMENT → VALUE → MIXED_CONTENT → VALUE_TOKEN (4th token)
+  try testing.expectEqualStrings("\"see you later\"", mixed_value_token.value);
+}
+
+test "parsing works on file without trailing new line with recursive descent strategy" {
+  const contents =
+  \\unquoted=Envo
+  ;
+
+  const allocator = testing.allocator;
+
+  var parse_arena = std.heap.ArenaAllocator.init(allocator);
+  defer parse_arena.deinit();
+
+  const ast: ASTNode = try parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
+
+  // Root node needs to be file contents:
+  try testing.expect(ast.type == .FILE_CONTENTS);
+
+  // This case it should have 7 statements:
+  try testing.expect(ast.children.len == 1);
+}
+
+test "parsing works on file without trailing new line with iterative strategy" {
+  const contents =
+  \\unquoted=Envo
+  ;
+
+  const allocator = testing.allocator;
+
+  var parse_arena = std.heap.ArenaAllocator.init(allocator);
+  defer parse_arena.deinit();
+
+  const ast: ASTNode = try parse(parse_arena.allocator(), .ITERATIVE, contents);
+
+  // Root node needs to be file contents:
+  try testing.expect(ast.type == .FILE_CONTENTS);
+
+  // This case it should have 7 statements:
+  try testing.expect(ast.children.len == 1);
 }
