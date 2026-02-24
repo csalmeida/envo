@@ -205,8 +205,19 @@ pub const Parser = struct {
 
   /// Entry point for the iterative parsing strategy.
   ///
-  /// This method initiates an iterative parsing process by instantiating and managing its own call stack stored on the heap.
-  /// It enforces grammar and processes tokens building a tree of ASTNodes.
+  /// This method initiates an iterative parsing process by instantiating and\  /// managing its own call stack stored on the heap. It enforces grammar and
+  /// processes tokens building a tree of ASTNodes.\  ///
+  /// Iterative parsing works by:
+  /// - Starting with the root non-terminal symbol
+  /// - Using an explicit stack to simulate the recursive descent process
+  /// - Popping non-terminals from the stack and expanding them according to grammar rules
+  /// - Building the AST from the top down as each expansion creates its node and adds children
+  ///
+  /// Avoids using the call stack by managing its own stack on the heap,
+  /// making it suitable for deeply nested inputs.
+  ///
+  /// Returns: The root ASTNode representing the entire parsed file structure
+  /// Errors: Returns ParseError if the token stream doesn't match the grammar\
   fn parseIterative(self: *Parser) !ASTNode {
     const ast_root_node = try parse_it.parse(self);
     return ast_root_node;
