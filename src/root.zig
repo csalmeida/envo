@@ -5,6 +5,7 @@ const parser = @import("parser.zig");
 const Allocator = std.mem.Allocator;
 const ASTNode = parser.ASTNode;
 const ParseStrategy = parser.ParseStrategy;
+const EnvHashMap = std.StringHashMap([]const u8);
 
 /// Reads the entire contents of a file at the given path into a newly allocated buffer
 ///
@@ -27,7 +28,7 @@ pub fn loadFile(allocator: Allocator, file_path: []const u8) ![]u8 {
   return contents;
 }
 
-/// Parses the given source contents using the specified strategy and returns an AST (Abstract Syntax Tree).
+/// Parses the given source contents using the specified strategy and returns a raw AST (Abstract Syntax Tree).
 ///
 /// Parameters:
 ///   - `allocator`: The memory allocator used for allocating AST nodes and intermediate parse data.
@@ -35,9 +36,37 @@ pub fn loadFile(allocator: Allocator, file_path: []const u8) ![]u8 {
 ///   - `contents`: The raw source contents to parse.
 ///
 /// Returns: An `ASTNode` representing the root of the parsed abstract syntax tree.
+///\/// Errors: Returns an error if parsing fails (e.g., due to invalid syntax in `contents`).
+pub fn ast(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !ASTNode {
+  const abstract_syntax_tree: ASTNode = try parser.parse(allocator, strategy, contents);
+  return abstract_syntax_tree;
+}
+
+/// Parses the given source contents using the specified strategy and returns a hash map of environment key-value pairs.
+///\/// Parameters:
+///   - `allocator`: The memory allocator used for allocating AST nodes, intermediate parse data, and duplicated key-value strings.
+///   - `strategy`: The parsing strategy to use (determines how the input is interpreted).
+///   - `contents`: The raw source contents to parse.
 ///
-/// Errors: Returns an error if parsing fails (e.g., due to invalid syntax in `contents`).
-pub fn parse(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !ASTNode {
-  const ast: ASTNode = try parser.parse(allocator, strategy, contents);
-  return ast;
+/// Returns: An `EnvHashMap` (`StringHashMap([]const u8)`) containing the parsed environment variable key-value pairs.
+///
+/// Errors: Returns an error if parsing fails (e.g., due to invalid syntax in `contents`) or if memory allocation fails.
+///
+/// Note: The caller is responsible for freeing the returned hash map and its allocated keys/values.
+pub fn parse(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !EnvHashMap {
+  const abstract_syntax_tree: ASTNode = try parser.parse(allocator, strategy, contents);
+  var env_data = std.StringHashMap([]const u8).init(allocator);
+
+  // Iterate through each statement node in the tree.
+  // Access the first assignment node and get the identifier (key) and value.
+  // These need to be reallocated so we can access them later and added to the hash map.
+  for (abstract_syntax_tree.children) |ast_node| {
+    const identifier = try allocator.dupe(u8, ast_node.children[0].children[0].value);
+    const value = try allocator.dupe(u8, ast_node.children[0].children[1].value);
+
+    // Add the pair to the hash map.
+    try env_data.put(identifier, value);
+  }
+
+  return env_data;
 }
