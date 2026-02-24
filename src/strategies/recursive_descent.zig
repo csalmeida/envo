@@ -1,6 +1,25 @@
+/// Recursive Descent Parsing Strategy
+///
+/// This module implements a recursive descent parser for `.env` files. Each function
+/// corresponds to a grammar rule (non-terminal) and attempts to match the input tokens
+/// against that rule, recursively descending into sub-rules as needed. The entry point
+/// is `parse`, which begins by parsing the top-level `<FILE_CONTENTS>` rule.
+///
+/// The supported grammar is:
+///   <FILE_CONTENTS>  ::= NEW_LINE* <STATEMENT>* END_OF_FILE
+///   <STATEMENT>      ::= <ASSIGNMENT> (WHITE_SPACE)* NEW_LINE+\///   <ASSIGNMENT>     ::= <IDENTIFIER> (WHITE_SPACE)* EQUALS (WHITE_SPACE)* <VALUE>
+///   <IDENTIFIER>     ::= WORD
+///   <VALUE>          ::= <MIXED_CONTENT> | ε
+///   <MIXED_CONTENT>  ::= <VALUE_TOKEN> (WHITE_SPACE* <VALUE_TOKEN>)*\///   <VALUE_TOKEN>    ::= WORD | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING
+///
+/// Each parse function consumes tokens from the `Parser` and returns an `ASTNode`
+/// representing the parsed structure. Errors are reported as `ParseError` values
+/// when unexpected tokens are encountered.
+
 const std = @import("std");
 const prsr = @import("../parser.zig");
 
+// Types used in parsing, shared across strategies.
 const Parser = prsr.Parser;
 const ASTNode = prsr.ASTNode;
 const ASTArrayList = prsr.ASTArrayList;
@@ -8,7 +27,7 @@ const ParseError = prsr.ParseError;
 
 /// Parses a grammar rule:
 /// <FILE_CONTENTS> ::= NEW_LINE* <STATEMENT>* END_OF_FILE
-pub fn parseFileContents(parser: *Parser) !ASTNode {
+fn parseFileContents(parser: *Parser) !ASTNode {
     var children_nodes: ASTArrayList = .empty;
 
     // Consume any leading blank lines before looking for statements:
@@ -226,4 +245,9 @@ fn parseValueToken(parser: *Parser) !ASTNode {
     .value = try parser.allocator.dupe(u8, token.value),
     .children = try parser.emptyChildren()
   };
+}
+
+/// Initiates parsing using recursive descent strategy.
+pub fn parse(parser: *Parser) !ASTNode {
+  return try parseFileContents(parser);
 }
