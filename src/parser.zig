@@ -50,7 +50,7 @@ const Token = lexer.Token;
 const TokenType = lexer.TokenType;
 const TokenArrayList = std.ArrayList(Token);
 
-const ParseStrategy = enum {
+pub const ParseStrategy = enum {
   RECURSIVE_DESCENT,
   ITERATIVE
 };
