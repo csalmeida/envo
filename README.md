@@ -52,6 +52,38 @@ Once configured, you can import `envo` in your Zig source files:
 const envo = @import("envo");
 ```
 
+# Usage Example
+
+The following example loads a `.env` file, parses its contents, and reads values by key:
+
+```zig
+const std = @import("std");
+const envo = @import("envo");
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const base_allocator = gpa.allocator();
+
+    // Load the .env file contents:
+    const env_contents = try envo.loadFile(base_allocator, "./.env");
+    defer base_allocator.free(env_contents);
+
+    // Parse the contents into key-value pairs:
+    var parse_allocator = std.heap.ArenaAllocator.init(base_allocator);
+    defer parse_allocator.deinit();
+
+    const env_data = try envo.parse(parse_allocator.allocator(), .RECURSIVE_DESCENT, env_contents);
+
+    // Retrieve values by key:
+    const db_user = env_data.get("POSTGRES_USER").?;
+    const db_name = env_data.get("POSTGRES_DATABASE").?;
+    const db_password = env_data.get("POSTGRES_PASSWORD").?;
+
+    std.debug.print("User: {s}, Database: {s}\n", .{ db_user, db_name, db_password });
+}
+```
+
 # Grammar
 
 ```ruby
