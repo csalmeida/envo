@@ -2,6 +2,56 @@
 
 Built for version `0.15.2`.
 
+# Importing into a Zig Project
+
+Fetch the `envo` package and save it to `build.zig.zon`:
+
+```bash
+zig fetch --save git+https://github.com/csalmeida/envo
+```
+
+Then, in your `build.zig` file, load the dependency and its module:
+
+```zig
+    // Load the "envo" dependency from build.zig.zon:
+    const envo_package = b.dependency("envo", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    // Load the "envo" module from the package:
+    const envo_module = envo_package.module("envo");
+```
+
+Finally, make the module available to your executable. You can do this in one of two ways:
+
+**Option A** — Add the import when defining your executable's root module:
+
+```zig
+    const exe = b.addExecutable(.{
+        .name = "my_app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "envo", .module = envo_module },
+            },
+        }),
+    });
+```
+
+**Option B** — Add the import to an existing root module:
+
+```zig
+    exe.root_module.addImport("envo", envo_module);
+```
+
+Once configured, you can import `envo` in your Zig source files:
+
+```zig
+const envo = @import("envo");
+```
+
 # Grammar
 
 ```ruby
