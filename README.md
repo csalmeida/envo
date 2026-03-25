@@ -76,11 +76,11 @@ pub fn main() !void {
     const env_data = try envo.parse(parse_allocator.allocator(), .RECURSIVE_DESCENT, env_contents);
 
     // Retrieve values by key:
-    const db_user = env_data.get("POSTGRES_USER").?;
-    const db_name = env_data.get("POSTGRES_DATABASE").?;
-    const db_password = env_data.get("POSTGRES_PASSWORD").?;
+    const app_name = env_data.get("APP_NAME").?;
+    const app_port = env_data.get("APP_PORT").?;
+    const app_env = env_data.get("APP_ENV").?;
 
-    std.debug.print("User: {s}, Database: {s}\n", .{ db_user, db_name, db_password });
+    std.debug.print("App: {s}, Port: {s}, Env: {s}\n", .{ app_name, app_port, app_env });
 }
 ```
 
