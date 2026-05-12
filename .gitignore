@@ -5,3 +5,6 @@ zig-out
 
 # Assembly:
 *.a
+
+# Zed per project settings
+.zed
