@@ -1,4 +1,5 @@
-/// The iterative parsing strategy for the `.env` parser.\/// Builds an Abstract Syntax Tree using a managed call stack
+/// The iterative parsing strategy for the `.env` parser. 
+/// Builds an Abstract Syntax Tree using a managed call stack
 /// allocated to the heap.
 ///
 /// The call stack holds managed stack frames that hold the state of the parsing.
@@ -17,7 +18,8 @@
 ///
 /// ## Core Components
 /// - `StackFrame`: Represents the state of a single production being parsed,
-///    including step tracking, accumulated bytes, child nodes, and a value slice.\/// - `CallStack`: Manages the stack of `StackFrame`s, handling push/pop operations
+///    including step tracking, accumulated bytes, child nodes, and a value slice. 
+/// - `CallStack`: Manages the stack of `StackFrame`s, handling push/pop operations
 ///    and storing the root `ASTNode` result once parsing completes.
 /// - `parse`: The entry point that initializes the stack with a `FILE_CONTENTS` frame
 ///    and iteratively dispatches each production to its handler until the stack is empty.
@@ -48,7 +50,9 @@ const ASTNodeType = prsr.ASTNodeType;
 /// - `value`: A byte slice holding the accumulated value for the resulting `ASTNode` when the frame is popped.
 /// - `nodes`: An `ASTArrayList` of child `ASTNode`s collected during parsing, forming the subtree for this production.
 /// - `bytes_accumulated`: A `std.ArrayList(u8)` used to incrementally collect bytes across multiple tokens,
-///    which is especially useful for productions like `MIXED_CONTENT` that span several value tokens.\///\/// ## Methods
+///    which is especially useful for productions like `MIXED_CONTENT` that span several value tokens.
+///
+/// ## Methods
 /// - `init(allocator, production)`: Creates a new `StackFrame` for the given production type with
 ///    step set to `0`, an empty value, no child nodes, and an empty byte accumulator.
 const StackFrame = struct {
@@ -83,7 +87,8 @@ const StackFrame = struct {
 /// `result`.
 ///
 /// ## Properties
-/// - `allocator`: The memory allocator used for managing frames and nodes.\/// - `frames`: The list of active `StackFrame`s representing the current call stack.
+/// - `allocator`: The memory allocator used for managing frames and nodes. 
+/// - `frames`: The list of active `StackFrame`s representing the current call stack.
 /// - `result`: The root `ASTNode` produced once all frames have been processed, or `null` if parsing is still in progress.
 const CallStack = struct {
   allocator: Allocator,
