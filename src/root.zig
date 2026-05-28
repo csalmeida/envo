@@ -18,12 +18,12 @@ const EnvHashMap = std.StringHashMap([]const u8);
 /// Errors: Returns an error if the file cannot be opened, read, or exceeds the maximum file size (1 MB).
 ///
 /// Note: The caller is responsible for freeing the returned buffer with `defer allocator.free(contents);`.
-pub fn loadFile(allocator: Allocator, file_path: []const u8) ![]u8 {
-  const cwd = std.fs.cwd();
+pub fn loadFile(io: std.Io, allocator: Allocator, file_path: []const u8) ![]u8 {
+  const cwd = std.Io.Dir.cwd();
 
   // To read all the file we need to define the max size for it, pass the path where to look for the file and allocate it to memory.
   const max_file_size: usize = 1024 * 1024; // 1mb.
-  const contents = try cwd.readFileAlloc(allocator, file_path, max_file_size);
+  const contents = try cwd.readFileAlloc(io, file_path, allocator, std.Io.Limit.limited(max_file_size));
 
   return contents;
 }
