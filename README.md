@@ -1,6 +1,6 @@
 # Envo - A .env file parser for Zig
 
-Built for version `0.15.2`.
+Built for Zig version `0.16.0`.
 
 # Importing into a Zig Project
 
