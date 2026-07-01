@@ -9,3 +9,7 @@ zig-pkg
 
 # Zed per project settings
 .zed
+
+# MacOS:
+._*
+.DS_Store
