@@ -36,7 +36,6 @@
 ///
 /// The parser achieves most LL(1) properties: no FIRST set conflicts, single lookahead
 /// sufficient for all decisions, no left recursion, and a deterministic parse table.
-
 const std = @import("std");
 const lexer = @import("lexer.zig");
 
@@ -50,19 +49,16 @@ const Token = lexer.Token;
 const TokenType = lexer.TokenType;
 const TokenArrayList = std.ArrayList(Token);
 
-pub const ParseStrategy = enum {
-  RECURSIVE_DESCENT,
-  ITERATIVE
-};
+pub const ParseStrategy = enum { RECURSIVE_DESCENT, ITERATIVE };
 
 const NoNTerminalSymbol = enum {
-  FILE_CONTENTS,
-  STATEMENT,
-  ASSIGNMENT,
-  IDENTIFIER,
-  VALUE,
-  MIXED_CONTENT,
-  VALUE_TOKEN,
+    FILE_CONTENTS,
+    STATEMENT,
+    ASSIGNMENT,
+    IDENTIFIER,
+    VALUE,
+    MIXED_CONTENT,
+    VALUE_TOKEN,
 };
 
 pub const ASTNodeType = NoNTerminalSymbol;
@@ -103,293 +99,283 @@ pub const ASTNodeType = NoNTerminalSymbol;
 ///   All fields use memory allocated from the parser's arena allocator and
 ///   should not be manually freed, instead
 /// the caller can use their defined area for bulk deallocation when parsing is complete.
-pub const ASTNode = struct {
-  type: ASTNodeType,
-  value: []const u8,
-  children: []ASTNode
-};
+pub const ASTNode = struct { type: ASTNodeType, value: []const u8, children: []ASTNode };
 
-pub const ParseError = error {
-  UnexpectedToken
-} || lexer.TokenizationError;
+pub const ParseError = error{UnexpectedToken} || lexer.TokenizationError;
 
 pub const Parser = struct {
-  currentTokenPosition: usize, // Current token the parser is looking at.
-  tokens: []Token, // Terminal symbols received from lexical analysis.
-  allocator: Allocator, // Required to maintain lists.
+    currentTokenPosition: usize, // Current token the parser is looking at.
+    tokens: []Token, // Terminal symbols received from lexical analysis.
+    allocator: Allocator, // Required to maintain lists.
 
-  /// Initializes a new Parser instance with the provided allocator and tokens.
-  ///
-  /// The allocator should be an arena allocator that will be used for all memory
-  /// allocations during parsing, including AST node creation and string duplication.
-  /// Using an arena allocator allows for efficient bulk deallocation of all parser
-  /// memory when parsing is complete.
-  ///
-  /// Parameters:
-  ///   allocator: An arena allocator for parser memory management
-  ///   tokens: Slice of tokens from the lexical analysis phase
-  ///
-  /// Returns: A new Parser instance ready to begin parsing
-  pub fn init(allocator: Allocator, tokens: []Token) Parser {
-      return Parser {
-          .currentTokenPosition = 0,
-          .tokens = tokens,
-          .allocator = allocator
-      };
-  }
-
-  /// Returns the terminal token at the current parser position.
-  /// The current position is tracked by `currentTokenPosition` and advances
-  /// as the parser consumes tokens during parsing.
-  pub fn currentToken(self: *Parser) Token {
-    return self.tokens[self.currentTokenPosition];
-  }
-
-  /// Advances the parser to the next token in the sequence.
-  ///
-  /// This method increments the current token position, allowing the parser
-  /// to move forward through the token stream during parsing operations.
-  /// After calling this method, `currentToken()` will return the next token
-  /// in the sequence.
-  fn advance(self: *Parser) void {
-    self.currentTokenPosition += 1;
-  }
-
-  /// Checks that the expected token is being used in the defined grammar.
-  /// When successful it advances the token position for the parser to be able to look at the next token.
-  /// Returns an error if token breaks the expected pattern for a production.
-  pub fn expect(self: *Parser, expected_token_type: TokenType) ParseError!Token {
-    const current_token = self.currentToken();
-    if (current_token.type == expected_token_type) {
-      // Even though .advance() changes the .currentToken() result we can return current_token it has not changed since.
-      self.advance();
-      return current_token;
+    /// Initializes a new Parser instance with the provided allocator and tokens.
+    ///
+    /// The allocator should be an arena allocator that will be used for all memory
+    /// allocations during parsing, including AST node creation and string duplication.
+    /// Using an arena allocator allows for efficient bulk deallocation of all parser
+    /// memory when parsing is complete.
+    ///
+    /// Parameters:
+    ///   allocator: An arena allocator for parser memory management
+    ///   tokens: Slice of tokens from the lexical analysis phase
+    ///
+    /// Returns: A new Parser instance ready to begin parsing
+    pub fn init(allocator: Allocator, tokens: []Token) Parser {
+        return Parser{ .currentTokenPosition = 0, .tokens = tokens, .allocator = allocator };
     }
 
-    return ParseError.UnexpectedToken;
-  }
+    /// Returns the terminal token at the current parser position.
+    /// The current position is tracked by `currentTokenPosition` and advances
+    /// as the parser consumes tokens during parsing.
+    pub fn currentToken(self: *Parser) Token {
+        return self.tokens[self.currentTokenPosition];
+    }
 
-  /// Creates an empty children array for AST leaf nodes.
-  ///
-  /// This method allocates a zero-length slice of ASTNode to represent
-  /// an empty children array for leaf nodes in the Abstract Syntax Tree.
-  /// Leaf nodes are terminal nodes that have no child nodes beneath them
-  /// in the tree structure.
-  ///
-  /// Returns: An empty slice of ASTNode with zero capacity
-  /// Errors: Returns allocation errors if memory allocation fails
-  pub fn emptyChildren(self: *Parser) ![]ASTNode {
-      return try self.allocator.alloc(ASTNode, 0);
-  }
+    /// Advances the parser to the next token in the sequence.
+    ///
+    /// This method increments the current token position, allowing the parser
+    /// to move forward through the token stream during parsing operations.
+    /// After calling this method, `currentToken()` will return the next token
+    /// in the sequence.
+    fn advance(self: *Parser) void {
+        self.currentTokenPosition += 1;
+    }
 
-  /// Entry point for the recursive descent parsing strategy.
-  ///
-  /// This method initiates the recursive descent parsing process by starting
-  /// at the top-level grammar rule (FILE_CONTENTS) and recursively parsing
-  /// the token stream according to the defined grammar rules.
-  ///
-  /// Recursive descent parsing works by:
-  /// - Starting with the root non-terminal symbol
-  /// - For each non-terminal, calling the corresponding parse method
-  /// - Each parse method handles one grammar rule and calls other parse methods for sub-rules
-  /// - Building the AST from the top down as each method creates its node and adds children
-  ///
-  /// Uses the call stack but safe to use for most cases.
-  ///
-  /// Returns: The root ASTNode representing the entire parsed file structure
-  /// Errors: Returns ParseError if the token stream doesn't match the grammar
-  fn parseRecursiveDescent(self: *Parser) !ASTNode {
-    const ast_root_node = try parse_rd.parse(self);
-    return ast_root_node;
-  }
+    /// Checks that the expected token is being used in the defined grammar.
+    /// When successful it advances the token position for the parser to be able to look at the next token.
+    /// Returns an error if token breaks the expected pattern for a production.
+    pub fn expect(self: *Parser, expected_token_type: TokenType) ParseError!Token {
+        const current_token = self.currentToken();
+        if (current_token.type == expected_token_type) {
+            // Even though .advance() changes the .currentToken() result we can return current_token it has not changed since.
+            self.advance();
+            return current_token;
+        }
 
-  /// Entry point for the iterative parsing strategy.
-  ///
-  /// This method initiates an iterative parsing process by instantiating and\  /// managing its own call stack stored on the heap. It enforces grammar and
-  /// processes tokens building a tree of ASTNodes.\  ///
-  /// Iterative parsing works by:
-  /// - Starting with the root non-terminal symbol
-  /// - Using an explicit stack to simulate the recursive descent process
-  /// - Popping non-terminals from the stack and expanding them according to grammar rules
-  /// - Building the AST from the top down as each expansion creates its node and adds children
-  ///
-  /// Avoids using the call stack by managing its own stack on the heap,
-  /// making it suitable for deeply nested inputs.
-  ///
-  /// Returns: The root ASTNode representing the entire parsed file structure
-  /// Errors: Returns ParseError if the token stream doesn't match the grammar\
-  fn parseIterative(self: *Parser) !ASTNode {
-    const ast_root_node = try parse_it.parse(self);
-    return ast_root_node;
-  }
+        return ParseError.UnexpectedToken;
+    }
+
+    /// Creates an empty children array for AST leaf nodes.
+    ///
+    /// This method allocates a zero-length slice of ASTNode to represent
+    /// an empty children array for leaf nodes in the Abstract Syntax Tree.
+    /// Leaf nodes are terminal nodes that have no child nodes beneath them
+    /// in the tree structure.
+    ///
+    /// Returns: An empty slice of ASTNode with zero capacity
+    /// Errors: Returns allocation errors if memory allocation fails
+    pub fn emptyChildren(self: *Parser) ![]ASTNode {
+        return try self.allocator.alloc(ASTNode, 0);
+    }
+
+    /// Entry point for the recursive descent parsing strategy.
+    ///
+    /// This method initiates the recursive descent parsing process by starting
+    /// at the top-level grammar rule (FILE_CONTENTS) and recursively parsing
+    /// the token stream according to the defined grammar rules.
+    ///
+    /// Recursive descent parsing works by:
+    /// - Starting with the root non-terminal symbol
+    /// - For each non-terminal, calling the corresponding parse method
+    /// - Each parse method handles one grammar rule and calls other parse methods for sub-rules
+    /// - Building the AST from the top down as each method creates its node and adds children
+    ///
+    /// Uses the call stack but safe to use for most cases.
+    ///
+    /// Returns: The root ASTNode representing the entire parsed file structure
+    /// Errors: Returns ParseError if the token stream doesn't match the grammar
+    fn parseRecursiveDescent(self: *Parser) !ASTNode {
+        const ast_root_node = try parse_rd.parse(self);
+        return ast_root_node;
+    }
+
+    /// Entry point for the iterative parsing strategy.
+    ///
+    /// This method initiates an iterative parsing process by instantiating and\  /// managing its own call stack stored on the heap. It enforces grammar and
+    /// processes tokens building a tree of ASTNodes.\  ///
+    /// Iterative parsing works by:
+    /// - Starting with the root non-terminal symbol
+    /// - Using an explicit stack to simulate the recursive descent process
+    /// - Popping non-terminals from the stack and expanding them according to grammar rules
+    /// - Building the AST from the top down as each expansion creates its node and adds children
+    ///
+    /// Avoids using the call stack by managing its own stack on the heap,
+    /// making it suitable for deeply nested inputs.
+    ///
+    /// Returns: The root ASTNode representing the entire parsed file structure
+    /// Errors: Returns ParseError if the token stream doesn't match the grammar\
+    fn parseIterative(self: *Parser) !ASTNode {
+        const ast_root_node = try parse_it.parse(self);
+        return ast_root_node;
+    }
 };
 
 /// Receives the contents of a file and returns an Abstract Syntax Tree of the input.
 /// If the structure is not compatible with the grammar it will fail and throw an error.
 pub fn parse(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !ASTNode {
-  // Turns contents into tokens:
-  var tokens = try lexer.tokenise(allocator, contents);
-  defer lexer.freeTokens(allocator, &tokens);
+    // Turns contents into tokens:
+    var tokens = try lexer.tokenise(allocator, contents);
+    defer lexer.freeTokens(allocator, &tokens);
 
-  // Shares token list with parser.
-  var parser = Parser.init(allocator, tokens.items);
+    // Shares token list with parser.
+    var parser = Parser.init(allocator, tokens.items);
 
-  // Parse contents from an available parsing strategy.
-  switch (strategy) {
-      .RECURSIVE_DESCENT => return try parser.parseRecursiveDescent(),
-      .ITERATIVE => return try parser.parseIterative(),
-  }
+    // Parse contents from an available parsing strategy.
+    switch (strategy) {
+        .RECURSIVE_DESCENT => return try parser.parseRecursiveDescent(),
+        .ITERATIVE => return try parser.parseIterative(),
+    }
 }
 
 // TESTS
 const testing = std.testing;
 
 test "generates correct AST with recursive descent strategy" {
-  const contents =
-  \\
-  \\# A comment which should be ignored. This file is used to test the most comment cases for this grammar.
-  \\unquoted=Envo
-  \\double_quoted="Envo"
-  \\single_quoted='Envo'
-  \\multiline="-----BEGIN CERTIFICATE-----
-  \\MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
-  \\-----END CERTIFICATE-----"
-  \\mixed_content=hello, she said "see you later" to 'Florencio'.
-  \\empty=
-  \\        white_space="                     "
-  \\
-  ;
+    const contents =
+        \\
+        \\# A comment which should be ignored. This file is used to test the most comment cases for this grammar.
+        \\unquoted=Envo
+        \\double_quoted="Envo"
+        \\single_quoted='Envo'
+        \\multiline="-----BEGIN CERTIFICATE-----
+        \\MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
+        \\-----END CERTIFICATE-----"
+        \\mixed_content=hello, she said "see you later" to 'Florencio'.
+        \\empty=
+        \\        white_space="                     "
+        \\
+    ;
 
-  const allocator = testing.allocator;
+    const allocator = testing.allocator;
 
-  var parse_arena = std.heap.ArenaAllocator.init(allocator);
-  defer parse_arena.deinit();
+    var parse_arena = std.heap.ArenaAllocator.init(allocator);
+    defer parse_arena.deinit();
 
-  const ast: ASTNode = try parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
+    const ast: ASTNode = try parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
 
-  // Root node needs to be file contents:
-  try testing.expect(ast.type == .FILE_CONTENTS);
+    // Root node needs to be file contents:
+    try testing.expect(ast.type == .FILE_CONTENTS);
 
-  // This case it should have 7 statements:
-  try testing.expect(ast.children.len == 7);
+    // This case it should have 7 statements:
+    try testing.expect(ast.children.len == 7);
 
-  // Empty value needs to be am empty string.
-  const empty_statement = ast.children[5];
-  const empty_value = empty_statement.children[0].children[1]; // STATEMENT → ASSIGNMENT → VALUE
-  try testing.expect(empty_value.children.len == 0);
-  try testing.expectEqualStrings("", empty_value.value);
+    // Empty value needs to be am empty string.
+    const empty_statement = ast.children[5];
+    const empty_value = empty_statement.children[0].children[1]; // STATEMENT → ASSIGNMENT → VALUE
+    try testing.expect(empty_value.children.len == 0);
+    try testing.expectEqualStrings("", empty_value.value);
 
-  // Mixed content should include many value tokens as children, here we check if one of them is at the correct depth.
-  const mixed_statement = ast.children[4];
-  const mixed_value_token = mixed_statement.children[0].children[1].children[0].children[3];
-  // STATEMENT → ASSIGNMENT → VALUE → MIXED_CONTENT → VALUE_TOKEN (4th token)
-  try testing.expectEqualStrings("\"see you later\"", mixed_value_token.value);
+    // Mixed content should include many value tokens as children, here we check if one of them is at the correct depth.
+    const mixed_statement = ast.children[4];
+    const mixed_value_token = mixed_statement.children[0].children[1].children[0].children[3];
+    // STATEMENT → ASSIGNMENT → VALUE → MIXED_CONTENT → VALUE_TOKEN (4th token)
+    try testing.expectEqualStrings("\"see you later\"", mixed_value_token.value);
 }
 
 test "generates correct AST with iterative strategy" {
-  const contents =
-  \\
-  \\# A comment which should be ignored. This file is used to test the most comment cases for this grammar.
-  \\unquoted=Envo
-  \\double_quoted="Envo"
-  \\single_quoted='Envo'
-  \\multiline="-----BEGIN CERTIFICATE-----
-  \\MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
-  \\-----END CERTIFICATE-----"
-  \\mixed_content=hello, she said "see you later" to 'Florencio'.
-  \\empty=
-  \\        white_space="                     "
-  \\
-  ;
+    const contents =
+        \\
+        \\# A comment which should be ignored. This file is used to test the most comment cases for this grammar.
+        \\unquoted=Envo
+        \\double_quoted="Envo"
+        \\single_quoted='Envo'
+        \\multiline="-----BEGIN CERTIFICATE-----
+        \\MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
+        \\-----END CERTIFICATE-----"
+        \\mixed_content=hello, she said "see you later" to 'Florencio'.
+        \\empty=
+        \\        white_space="                     "
+        \\
+    ;
 
-  const allocator = testing.allocator;
+    const allocator = testing.allocator;
 
-  var parse_arena = std.heap.ArenaAllocator.init(allocator);
-  defer parse_arena.deinit();
+    var parse_arena = std.heap.ArenaAllocator.init(allocator);
+    defer parse_arena.deinit();
 
-  const ast: ASTNode = try parse(parse_arena.allocator(), .ITERATIVE, contents);
+    const ast: ASTNode = try parse(parse_arena.allocator(), .ITERATIVE, contents);
 
-  // Root node needs to be file contents:
-  try testing.expect(ast.type == .FILE_CONTENTS);
+    // Root node needs to be file contents:
+    try testing.expect(ast.type == .FILE_CONTENTS);
 
-  // This case it should have 7 statements:
-  try testing.expect(ast.children.len == 7);
+    // This case it should have 7 statements:
+    try testing.expect(ast.children.len == 7);
 
-  // Empty value needs to be am empty string.
-  const empty_statement = ast.children[5];
-  const empty_value = empty_statement.children[0].children[1]; // STATEMENT → ASSIGNMENT → VALUE
-  try testing.expect(empty_value.children.len == 0);
-  try testing.expectEqualStrings("", empty_value.value);
+    // Empty value needs to be am empty string.
+    const empty_statement = ast.children[5];
+    const empty_value = empty_statement.children[0].children[1]; // STATEMENT → ASSIGNMENT → VALUE
+    try testing.expect(empty_value.children.len == 0);
+    try testing.expectEqualStrings("", empty_value.value);
 
-  // Mixed content should include many value tokens as children, here we check if one of them is at the correct depth.
-  const mixed_statement = ast.children[4];
-  const mixed_value_token = mixed_statement.children[0].children[1].children[0].children[3];
-  // STATEMENT → ASSIGNMENT → VALUE → MIXED_CONTENT → VALUE_TOKEN (4th token)
-  try testing.expectEqualStrings("\"see you later\"", mixed_value_token.value);
+    // Mixed content should include many value tokens as children, here we check if one of them is at the correct depth.
+    const mixed_statement = ast.children[4];
+    const mixed_value_token = mixed_statement.children[0].children[1].children[0].children[3];
+    // STATEMENT → ASSIGNMENT → VALUE → MIXED_CONTENT → VALUE_TOKEN (4th token)
+    try testing.expectEqualStrings("\"see you later\"", mixed_value_token.value);
 }
 
 test "parsing works on file without trailing new line with recursive descent strategy" {
-  const contents =
-  \\unquoted=Envo
-  ;
+    const contents =
+        \\unquoted=Envo
+    ;
 
-  const allocator = testing.allocator;
+    const allocator = testing.allocator;
 
-  var parse_arena = std.heap.ArenaAllocator.init(allocator);
-  defer parse_arena.deinit();
+    var parse_arena = std.heap.ArenaAllocator.init(allocator);
+    defer parse_arena.deinit();
 
-  const ast: ASTNode = try parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
+    const ast: ASTNode = try parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
 
-  // Root node needs to be file contents:
-  try testing.expect(ast.type == .FILE_CONTENTS);
+    // Root node needs to be file contents:
+    try testing.expect(ast.type == .FILE_CONTENTS);
 
-  // This case it should have 7 statements:
-  try testing.expect(ast.children.len == 1);
+    // This case it should have 7 statements:
+    try testing.expect(ast.children.len == 1);
 }
 
 test "parsing works on file without trailing new line with iterative strategy" {
-  const contents =
-  \\unquoted=Envo
-  ;
+    const contents =
+        \\unquoted=Envo
+    ;
 
-  const allocator = testing.allocator;
+    const allocator = testing.allocator;
 
-  var parse_arena = std.heap.ArenaAllocator.init(allocator);
-  defer parse_arena.deinit();
+    var parse_arena = std.heap.ArenaAllocator.init(allocator);
+    defer parse_arena.deinit();
 
-  const ast: ASTNode = try parse(parse_arena.allocator(), .ITERATIVE, contents);
+    const ast: ASTNode = try parse(parse_arena.allocator(), .ITERATIVE, contents);
 
-  // Root node needs to be file contents:
-  try testing.expect(ast.type == .FILE_CONTENTS);
+    // Root node needs to be file contents:
+    try testing.expect(ast.type == .FILE_CONTENTS);
 
-  // This case it should have 7 statements:
-  try testing.expect(ast.children.len == 1);
+    // This case it should have 7 statements:
+    try testing.expect(ast.children.len == 1);
 }
 
 test "returns error on invalid input with recursive descent strategy" {
-  const contents =
-  \\KEY value
-  ;
+    const contents =
+        \\KEY value
+    ;
 
-  const allocator = testing.allocator;
+    const allocator = testing.allocator;
 
-  var parse_arena = std.heap.ArenaAllocator.init(allocator);
-  defer parse_arena.deinit();
+    var parse_arena = std.heap.ArenaAllocator.init(allocator);
+    defer parse_arena.deinit();
 
-  const result = parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
-  try testing.expectError(ParseError.UnexpectedToken, result);
+    const result = parse(parse_arena.allocator(), .RECURSIVE_DESCENT, contents);
+    try testing.expectError(ParseError.UnexpectedToken, result);
 }
 
 test "returns error on invalid input with iterative strategy" {
-  const contents =
-  \\KEY value
-  ;
+    const contents =
+        \\KEY value
+    ;
 
-  const allocator = testing.allocator;
+    const allocator = testing.allocator;
 
-  var parse_arena = std.heap.ArenaAllocator.init(allocator);
-  defer parse_arena.deinit();
+    var parse_arena = std.heap.ArenaAllocator.init(allocator);
+    defer parse_arena.deinit();
 
-  const result = parse(parse_arena.allocator(), .ITERATIVE, contents);
-  try testing.expectError(ParseError.UnexpectedToken, result);
+    const result = parse(parse_arena.allocator(), .ITERATIVE, contents);
+    try testing.expectError(ParseError.UnexpectedToken, result);
 }

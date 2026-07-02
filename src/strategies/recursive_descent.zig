@@ -15,7 +15,6 @@
 /// Each parse function consumes tokens from the `Parser` and returns an `ASTNode`
 /// representing the parsed structure. Errors are reported as `ParseError` values
 /// when unexpected tokens are encountered.
-
 const std = @import("std");
 const prsr = @import("../parser.zig");
 
@@ -55,7 +54,7 @@ fn parseFileContents(parser: *Parser) !ASTNode {
     // Once all the potential available statements are done, we expect EOF.
     _ = try parser.expect(.END_OF_FILE);
 
-    return ASTNode {
+    return ASTNode{
         .type = .FILE_CONTENTS,
         .value = "",
         .children = children_nodes.items,
@@ -65,194 +64,174 @@ fn parseFileContents(parser: *Parser) !ASTNode {
 /// Parses a grammar rule:
 /// <STATEMENT> ::= <ASSIGNMENT> WHITE_SPACE* (NEW_LINE+ | END_OF_FILE)
 fn parseStatement(parser: *Parser) !ASTNode {
-  // Attempt to parse an assignment:
-  const assignment_ast_node = try parseAssignment(parser);
+    // Attempt to parse an assignment:
+    const assignment_ast_node = try parseAssignment(parser);
 
-  // Allocate some memory for the list of children, in this case a single assignment:
-  var children = try parser.allocator.alloc(ASTNode, 1);
-  children[0] = assignment_ast_node;
+    // Allocate some memory for the list of children, in this case a single assignment:
+    var children = try parser.allocator.alloc(ASTNode, 1);
+    children[0] = assignment_ast_node;
 
-  // Ignore any trailing .WHITE_SPACE by advancing until we find a `.NEW_LINE`:
-  while (parser.currentToken().type == .WHITE_SPACE) {
-    _ = try parser.expect(.WHITE_SPACE);
-  }
+    // Ignore any trailing .WHITE_SPACE by advancing until we find a `.NEW_LINE`:
+    while (parser.currentToken().type == .WHITE_SPACE) {
+        _ = try parser.expect(.WHITE_SPACE);
+    }
 
-  // A statement ends with one or more new lines, or END_OF_FILE if it's the last statement.
-  if (parser.currentToken().type == .NEW_LINE) {
-      _ = try parser.expect(.NEW_LINE);
-      // Ignore any other new lines:
-      while (parser.currentToken().type == .NEW_LINE) {
-          _ = try parser.expect(.NEW_LINE);
-      }
-  } else if (parser.currentToken().type == .END_OF_FILE) {
-      // Valid - last statement in file, no trailing newline required.
-  } else {
-      return ParseError.UnexpectedToken;
-  }
+    // A statement ends with one or more new lines, or END_OF_FILE if it's the last statement.
+    if (parser.currentToken().type == .NEW_LINE) {
+        _ = try parser.expect(.NEW_LINE);
+        // Ignore any other new lines:
+        while (parser.currentToken().type == .NEW_LINE) {
+            _ = try parser.expect(.NEW_LINE);
+        }
+    } else if (parser.currentToken().type == .END_OF_FILE) {
+        // Valid - last statement in file, no trailing newline required.
+    } else {
+        return ParseError.UnexpectedToken;
+    }
 
-  return ASTNode {
-    .type = .STATEMENT,
-    .value = "",
-    .children = children,
-  };
+    return ASTNode{
+        .type = .STATEMENT,
+        .value = "",
+        .children = children,
+    };
 }
 
 /// Parses a grammar rule:
 /// <ASSIGNMENT> ::= <IDENTIFIER> (WHITE_SPACE)* EQUALS (WHITE_SPACE)* <VALUE>
 fn parseAssignment(parser: *Parser) !ASTNode {
-  const identifier_ast_node = try parseIdentifier(parser);
+    const identifier_ast_node = try parseIdentifier(parser);
 
-  // We expect and consume whitespace tokens between the identifier and equals sign.
-  // These whitespace tokens are purely syntactic sugar for readability and don't carry
-  // semantic meaning in the assignment operation, so they are not included in the AST.
-  // The AST focuses on the logical structure (identifier = value) rather than formatting details.
-  while (parser.currentToken().type == .WHITE_SPACE) {
-    _ = try parser.expect(.WHITE_SPACE);
-  }
+    // We expect and consume whitespace tokens between the identifier and equals sign.
+    // These whitespace tokens are purely syntactic sugar for readability and don't carry
+    // semantic meaning in the assignment operation, so they are not included in the AST.
+    // The AST focuses on the logical structure (identifier = value) rather than formatting details.
+    while (parser.currentToken().type == .WHITE_SPACE) {
+        _ = try parser.expect(.WHITE_SPACE);
+    }
 
-  // At this point there should be an equal sign if this is an assignment.
-  // We don't add the equals to the AST since we know this is an assignment.
-  _ = try parser.expect(.EQUALS);
+    // At this point there should be an equal sign if this is an assignment.
+    // We don't add the equals to the AST since we know this is an assignment.
+    _ = try parser.expect(.EQUALS);
 
-  // There could be more spaces after the equal sign.
-  // These are accepted but won't be part of the tree either.
-  while (parser.currentToken().type == .WHITE_SPACE) {
-    _ = try parser.expect(.WHITE_SPACE);
-  }
+    // There could be more spaces after the equal sign.
+    // These are accepted but won't be part of the tree either.
+    while (parser.currentToken().type == .WHITE_SPACE) {
+        _ = try parser.expect(.WHITE_SPACE);
+    }
 
-  // Attempt to parse the value portion of the statement.
-  const value_ast_node = try parseValue(parser);
+    // Attempt to parse the value portion of the statement.
+    const value_ast_node = try parseValue(parser);
 
-  // Create the children nodes array:
-  var children = try parser.allocator.alloc(ASTNode, 2);
-  children[0] = identifier_ast_node;
-  children[1] = value_ast_node;
+    // Create the children nodes array:
+    var children = try parser.allocator.alloc(ASTNode, 2);
+    children[0] = identifier_ast_node;
+    children[1] = value_ast_node;
 
-  // We return the assignment AST node with the respective identifier and value non-terminal nodes.
-  return ASTNode {
-    .type = .ASSIGNMENT,
-    .value = "",
-    .children = children
-  };
+    // We return the assignment AST node with the respective identifier and value non-terminal nodes.
+    return ASTNode{ .type = .ASSIGNMENT, .value = "", .children = children };
 }
 
 /// Parses a grammar rule:
 /// <IDENTIFIER> ::= WORD
 /// On pattern match, one non-terminal .IDENTIFIER node is returned and we abstract the `.WORD` terminal.
 fn parseIdentifier(parser: *Parser) !ASTNode {
-  const token = try parser.expect(.WORD);
+    const token = try parser.expect(.WORD);
 
-  return ASTNode {
-    .type = .IDENTIFIER,
-    .value = try parser.allocator.dupe(u8, token.value),
-    .children = try parser.emptyChildren()
-  };
+    return ASTNode{ .type = .IDENTIFIER, .value = try parser.allocator.dupe(u8, token.value), .children = try parser.emptyChildren() };
 }
 
 /// Parses a grammar rule:
 /// <VALUE> ::= <MIXED_CONTENT> | ε
 fn parseValue(parser: *Parser) !ASTNode {
-  const token = parser.currentToken();
-  switch (token.type) {
-    .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
-      const mixed_content_ast_node = try parseMixedContent(parser);
-      var children = try parser.allocator.alloc(ASTNode, 1);
-      children[0] = mixed_content_ast_node;
+    const token = parser.currentToken();
+    switch (token.type) {
+        .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
+            const mixed_content_ast_node = try parseMixedContent(parser);
+            var children = try parser.allocator.alloc(ASTNode, 1);
+            children[0] = mixed_content_ast_node;
 
-      return ASTNode {
-        .type = .VALUE,
-        .value = try parser.allocator.dupe(u8, mixed_content_ast_node.value),
-        .children = children
-      };
-    },
-    else => {
-      // If it's not either of those it must be an empty value:
-      return ASTNode {
-        .type = .VALUE,
-        .value = "",
-        .children = try parser.emptyChildren()
-      };
+            return ASTNode{ .type = .VALUE, .value = try parser.allocator.dupe(u8, mixed_content_ast_node.value), .children = children };
+        },
+        else => {
+            // If it's not either of those it must be an empty value:
+            return ASTNode{ .type = .VALUE, .value = "", .children = try parser.emptyChildren() };
+        },
     }
-  }
 }
 
 /// Parses a grammar rule:
 /// <MIXED_CONTENT> ::= <VALUE_TOKEN> (WHITE_SPACE* <VALUE_TOKEN>)*
 fn parseMixedContent(parser: *Parser) !ASTNode {
-  // We do not want to free complete_value or children now - the arena allocator will be freed later by the caller
-  // when they're done with the AST, which will free all tokens, ASTNodes, and other allocated values.
-  var complete_value: std.ArrayList(u8) = .empty;
+    // We do not want to free complete_value or children now - the arena allocator will be freed later by the caller
+    // when they're done with the AST, which will free all tokens, ASTNodes, and other allocated values.
+    var complete_value: std.ArrayList(u8) = .empty;
 
-  // A <MIXED_CONTENT> can have multiple <VALUE_TOKEN> ASTNodes:
-  var children: std.ArrayList(ASTNode) = .empty;
+    // A <MIXED_CONTENT> can have multiple <VALUE_TOKEN> ASTNodes:
+    var children: std.ArrayList(ASTNode) = .empty;
 
-  // Attempt to find a value token:
-  const first_value_token = try parseValueToken(parser);
-  // Append it to our final string:
-  try complete_value.appendSlice(parser.allocator, first_value_token.value);
+    // Attempt to find a value token:
+    const first_value_token = try parseValueToken(parser);
+    // Append it to our final string:
+    try complete_value.appendSlice(parser.allocator, first_value_token.value);
 
-  // Add value token as a child:
-  try children.append(parser.allocator, first_value_token);
+    // Add value token as a child:
+    try children.append(parser.allocator, first_value_token);
 
-  // Keep parsing the remaining value tokens and white space.
-  while (true) {
-    // Step 1: While there's spaces after the first word we want to consume those:
-    // WHITE_SPACE* ← zero or more spaces
-    while (parser.currentToken().type == .WHITE_SPACE) {
-      const white_space_token = try parser.expect(.WHITE_SPACE);
-      try complete_value.appendSlice(parser.allocator, white_space_token.value);
+    // Keep parsing the remaining value tokens and white space.
+    while (true) {
+        // Step 1: While there's spaces after the first word we want to consume those:
+        // WHITE_SPACE* ← zero or more spaces
+        while (parser.currentToken().type == .WHITE_SPACE) {
+            const white_space_token = try parser.expect(.WHITE_SPACE);
+            try complete_value.appendSlice(parser.allocator, white_space_token.value);
+        }
+
+        // Check if we can parse another VALUE_TOKEN
+        const current_token = parser.currentToken();
+
+        const is_value_token_terminal = current_token.type == .WORD or
+            current_token.type == .DOUBLE_QUOTED_STRING or
+            current_token.type == .SINGLE_QUOTED_STRING;
+
+        if (is_value_token_terminal) {
+            // Collect the value token:
+            const value_token = try parseValueToken(parser);
+            try complete_value.appendSlice(parser.allocator, value_token.value);
+
+            // Add value token as a child:
+            try children.append(parser.allocator, value_token);
+        } else {
+            // No more VALUE_TOKENs, exit the loop
+            break;
+        }
     }
 
-    // Check if we can parse another VALUE_TOKEN
-    const current_token = parser.currentToken();
-
-    const is_value_token_terminal = current_token.type == .WORD or
-        current_token.type == .DOUBLE_QUOTED_STRING or
-        current_token.type == .SINGLE_QUOTED_STRING;
-
-    if (is_value_token_terminal) {
-        // Collect the value token:
-        const value_token = try parseValueToken(parser);
-        try complete_value.appendSlice(parser.allocator, value_token.value);
-
-        // Add value token as a child:
-        try children.append(parser.allocator, value_token);
-    } else {
-        // No more VALUE_TOKENs, exit the loop
-        break;
-    }
-  }
-
-  // Return the whole unquoted string:
-  return ASTNode {
-    .type = .MIXED_CONTENT,
-    .value = try parser.allocator.dupe(u8, complete_value.items),
-    .children = children.items,
-  };
+    // Return the whole unquoted string:
+    return ASTNode{
+        .type = .MIXED_CONTENT,
+        .value = try parser.allocator.dupe(u8, complete_value.items),
+        .children = children.items,
+    };
 }
 
 /// Parses a grammar rule:
 /// <VALUE_TOKEN> ::= WORD | DOUBLE_QUOTED_STRING | SINGLE_QUOTED_STRING
 fn parseValueToken(parser: *Parser) !ASTNode {
-  const token = parser.currentToken();
+    const token = parser.currentToken();
 
-  switch (token.type) {
-    .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
-      _ = try parser.expect(token.type);
-    },
-    else => {
-      return ParseError.UnexpectedToken;
+    switch (token.type) {
+        .WORD, .DOUBLE_QUOTED_STRING, .SINGLE_QUOTED_STRING => {
+            _ = try parser.expect(token.type);
+        },
+        else => {
+            return ParseError.UnexpectedToken;
+        },
     }
-  }
 
-  return ASTNode {
-    .type = .VALUE_TOKEN,
-    .value = try parser.allocator.dupe(u8, token.value),
-    .children = try parser.emptyChildren()
-  };
+    return ASTNode{ .type = .VALUE_TOKEN, .value = try parser.allocator.dupe(u8, token.value), .children = try parser.emptyChildren() };
 }
 
 /// Initiates parsing using recursive descent strategy.
 pub fn parse(parser: *Parser) !ASTNode {
-  return try parseFileContents(parser);
+    return try parseFileContents(parser);
 }
