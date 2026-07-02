@@ -60,20 +60,18 @@ The following example loads a `.env` file, parses its contents, and reads values
 const std = @import("std");
 const envo = @import("envo");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const base_allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var env_arena = std.heap.ArenaAllocator.init(gpa);
+    defer env_arena.deinit();
 
     // Load the .env file contents:
-    const env_contents = try envo.loadFile(base_allocator, "./.env");
-    defer base_allocator.free(env_contents);
+    const env_contents = try envo.loadFile(io, env_arena.allocator(), "./.env");
 
     // Parse the contents into key-value pairs:
-    var parse_allocator = std.heap.ArenaAllocator.init(base_allocator);
-    defer parse_allocator.deinit();
-
-    const env_data = try envo.parse(parse_allocator.allocator(), .RECURSIVE_DESCENT, env_contents);
+    const env_data = try envo.parse(env_arena.allocator(), .RECURSIVE_DESCENT, env_contents); // Call .allocator()
 
     // Retrieve values by key:
     const app_name = env_data.get("APP_NAME").?;
