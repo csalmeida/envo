@@ -1,6 +1,7 @@
 const std = @import("std");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
+const utils = @import("utils.zig");
 
 const Allocator = std.mem.Allocator;
 const ASTNode = parser.ASTNode;
@@ -19,13 +20,13 @@ const EnvHashMap = std.StringHashMap([]const u8);
 ///
 /// Note: The caller is responsible for freeing the returned buffer with `defer allocator.free(contents);`.
 pub fn loadFile(io: std.Io, allocator: Allocator, file_path: []const u8) ![]u8 {
-  const cwd = std.Io.Dir.cwd();
+    const cwd = std.Io.Dir.cwd();
 
-  // To read all the file we need to define the max size for it, pass the path where to look for the file and allocate it to memory.
-  const max_file_size: usize = 1024 * 1024; // 1mb.
-  const contents = try cwd.readFileAlloc(io, file_path, allocator, std.Io.Limit.limited(max_file_size));
+    // To read all the file we need to define the max size for it, pass the path where to look for the file and allocate it to memory.
+    const max_file_size: usize = 1024 * 1024; // 1mb.
+    const contents = try cwd.readFileAlloc(io, file_path, allocator, std.Io.Limit.limited(max_file_size));
 
-  return contents;
+    return contents;
 }
 
 /// Parses the given source contents using the specified strategy and returns a raw AST (Abstract Syntax Tree).
@@ -38,8 +39,8 @@ pub fn loadFile(io: std.Io, allocator: Allocator, file_path: []const u8) ![]u8 {
 /// Returns: An `ASTNode` representing the root of the parsed abstract syntax tree.
 ///\/// Errors: Returns an error if parsing fails (e.g., due to invalid syntax in `contents`).
 pub fn ast(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !ASTNode {
-  const abstract_syntax_tree: ASTNode = try parser.parse(allocator, strategy, contents);
-  return abstract_syntax_tree;
+    const abstract_syntax_tree: ASTNode = try parser.parse(allocator, strategy, contents);
+    return abstract_syntax_tree;
 }
 
 /// Parses the given source contents using the specified strategy and returns a hash map of environment key-value pairs.
@@ -54,48 +55,20 @@ pub fn ast(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) 
 ///
 /// Note: The caller is responsible for freeing the returned hash map and its allocated keys/values.
 pub fn parse(allocator: Allocator, strategy: ParseStrategy, contents: []const u8) !EnvHashMap {
-  const abstract_syntax_tree: ASTNode = try parser.parse(allocator, strategy, contents);
-  var env_data = std.StringHashMap([]const u8).init(allocator);
+    const abstract_syntax_tree: ASTNode = try parser.parse(allocator, strategy, contents);
+    var env_data = std.StringHashMap([]const u8).init(allocator);
 
-  // Iterate through each statement node in the tree.
-  // Access the first assignment node and get the identifier (key) and value.
-  // These need to be reallocated so we can access them later and added to the hash map.
-  for (abstract_syntax_tree.children) |ast_node| {
-    const identifier = try allocator.dupe(u8, ast_node.children[0].children[0].value);
-    const value = try allocator.dupe(u8, ast_node.children[0].children[1].value);
+    // Iterate through each statement node in the tree.
+    // Access the first assignment node and get the identifier (key) and value.
+    // These need to be reallocated so we can access them later and added to the hash map.
+    for (abstract_syntax_tree.children) |ast_node| {
+        const identifier = try allocator.dupe(u8, ast_node.children[0].children[0].value);
+        const value = try allocator.dupe(u8, ast_node.children[0].children[1].value);
 
-    // Add the pair to the hash map.
-    // It will transform quoted values as a side effect.
-    try env_data.put(identifier, stripQuotes(value));
-  }
+        // Add the pair to the hash map.
+        // It will transform quoted values as a side effect.
+        try env_data.put(identifier, utils.stripQuotes(value));
+    }
 
-  return env_data;
-}
-
-/// Strips surrounding quotation marks from a string value, if present.\///
-/// Removes matching pairs of single quotes (`'...'`) or double quotes (`"..."`)
-/// that wrap the entire value. If the value is empty, has no surrounding quotes,
-/// or the quotes are mismatched, the original value is returned unchanged.\///
-/// Parameters:
-///   - `value`: The string slice to potentially strip quotes from.
-///
-/// Returns: A string slice with the outer quotes removed, or the original slice if no quotes were found.
-fn stripQuotes(value: []const u8) []const u8 {
-  const is_empty_value = value.len == 0;
-
-  if (is_empty_value) {
-    return value;
-  }
-
-  const is_wrapped_by_quotes =
-    (value[0] == '\"' and value[value.len - 1] == '\"') or
-    (value[0] == '\'' and value[value.len - 1] == '\'');
-
-  // If there's quotes we grab a slice that excludes the extermeties of the string:
-  if (is_wrapped_by_quotes) {
-    return value[1..value.len - 1];
-  }
-
-  // Has no quotes, return value as is.
-  return value;
+    return env_data;
 }
