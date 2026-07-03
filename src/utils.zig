@@ -16,13 +16,23 @@ pub fn stripQuotes(value: []const u8) []const u8 {
         return value;
     }
 
-    const is_wrapped_by_quotes =
-        (value[0] == '\"' and value[value.len - 1] == '\"') or
-        (value[0] == '\'' and value[value.len - 1] == '\'');
+    // If it's a single character, it's not wrapped.
+    const maybe_wrapped_by_quotes =
+        value.len > 1 and ((value[0] == '\"' and value[value.len - 1] == '\"') or
+            (value[0] == '\'' and value[value.len - 1] == '\''));
 
     // If there's quotes we grab a slice that excludes the extermeties of the string:
-    if (is_wrapped_by_quotes) {
-        return value[1 .. value.len - 1];
+    if (maybe_wrapped_by_quotes) {
+        const quote_type = value[0];
+        // When index is found in this slice it means that it pairs with the first one.
+        // It assumes we won't strip anything and this should work for most common cases.
+        // For example it can't handle `"they said "hi""` and lets user adjust as needed.
+        const has_quote_before_end = std.mem.indexOfScalar(u8, value[1 .. value.len - 1], quote_type) != null;
+        if (has_quote_before_end) {
+            return value;
+        } else {
+            return value[1 .. value.len - 1];
+        }
     }
 
     // Has no quotes, return value as is.
