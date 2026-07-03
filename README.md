@@ -96,7 +96,17 @@ pub fn main(init: std.process.Init) !void {
 
 ## Tests
 
-Currently tests can be run for each file directly, it's worth running tests when modifying the lexer and parser behaviour to check it still yields the same results and follows grammar rules.
+Tests can be run using `zig build test --summary all` to run all available assertions:
+
+```bash
+zig build test --summary all
+Build Summary: 3/3 steps succeeded; 38/38 tests passed
+test success
+└─ run test 38 pass (38 total) 70ms MaxRSS:4M
+   └─ compile test Debug native cached 69ms MaxRSS:31M
+```
+
+Or tests can be run for each file directly, it's worth running tests when modifying the lexer and parser behaviour to check it still yields the same results and follows grammar rules.
 
 ```bash
 zig test src/lexer.zig
